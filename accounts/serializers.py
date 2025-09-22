@@ -1,32 +1,63 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
+from .models import CustomUser
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-class UserRegistrationSerializer(serializers.Serializer):
-    username = serializers.CharField(max_length=150)
-    first_name = serializers.CharField(max_length=30, required=False, allow_blank=True)
-    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
-    password = serializers.CharField(max_length=150, required=True, min_length=6, write_only=True)
+class UserRegistrationSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, min_length=6)
+    
+    class Meta:
+        model = CustomUser
+        fields = [
+            "id", "username", "first_name", "last_name", "password",
+            "coins", "registration_date", "boots", "pants", "tshirt", "cap"
+        ]
+        read_only_fields = ["coins", "registration_date", "boots", "pants", "tshirt", "cap"]   
 
     def validate_username(self, data):
         # Проверка что username не пустой
         if not data.strip():
             raise serializers.ValidationError("Username cannot be empty")
         # Проверка на уникальность (без учета регистра)
-        if User.objects.filter(username__iexact=data).exists():
+        if CustomUser.objects.filter(username__iexact=data).exists():
             raise serializers.ValidationError("Username already taken")
         return data
 
     def create(self, validated_data):
-        # Создаем пользователя с паролем
-        user = User.objects.create_user(
-            username=validated_data['username'],
-            first_name=validated_data.get('first_name', ''),
-            last_name=validated_data.get('last_name', ''),
-            password=validated_data['password']
+        user = CustomUser.objects.create_user(
+            username=validated_data["username"],
+            first_name=validated_data.get("first_name", ""),
+            last_name=validated_data.get("last_name", ""),
+            password=validated_data["password"],
         )
         return user
 
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        # Можно добавить кастомные поля прямо в токен (необязательно)
+        token['username'] = user.username
+        return token
+
+    def validate(self, attrs):
+        data = super().validate(attrs)
+
+        # Добавляем данные о пользователе в ответ
+        data['user'] = {
+            "id": self.user.id,
+            "username": self.user.username,
+            "first_name": self.user.first_name,
+            "last_name": self.user.last_name,
+            "coins": self.user.coins,
+            "registration_date": self.user.registration_date,
+            "boots": self.user.boots,
+            "pants": self.user.pants,
+            "tshirt": self.user.tshirt,
+            "cap": self.user.cap,
+        }
+        return data
 
 class UserLoginSerializer(serializers.Serializer):
     username = serializers.CharField(required=True)
@@ -45,3 +76,8 @@ class UserLoginSerializer(serializers.Serializer):
         else:
             raise serializers.ValidationError("Both username and password are required")
         return data
+
+class UserClothesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomUser
+        fields = ["boots", "pants", "tshirt", "cap"]
