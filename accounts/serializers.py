@@ -11,9 +11,10 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         model = CustomUser
         fields = [
             "id", "username", "first_name", "last_name", "password",
-            "coins", "registration_date", "boots", "pants", "tshirt", "cap"
+            "coins", "registration_date", "boots", "pants", "tshirt",
+            "cap", "gender"
         ]
-        read_only_fields = ["coins", "registration_date", "boots", "pants", "tshirt", "cap"]   
+        read_only_fields = ["coins", "registration_date", "boots", "pants", "tshirt", "cap", "gender"]   
 
     def validate_username(self, data):
         # Проверка что username не пустой
@@ -30,6 +31,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             first_name=validated_data.get("first_name", ""),
             last_name=validated_data.get("last_name", ""),
             password=validated_data["password"],
+            gender=validated_data.get("gender", None),
         )
         return user
 
@@ -80,4 +82,4 @@ class UserLoginSerializer(serializers.Serializer):
 class UserClothesSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
-        fields = ["boots", "pants", "tshirt", "cap"]
+        fields = ["boots", "pants", "tshirt", "cap", "gender"]

@@ -11,3 +11,9 @@ class CustomUser(AbstractUser):
     pants = models.IntegerField(default=0)
     tshirt = models.IntegerField(default=0)
     cap = models.IntegerField(default=0)
+    
+    GENDER_CHOICES = [
+        ('M', 'Male'),
+        ('F', 'Female'),
+    ]
+    gender = models.CharField(max_length=1, choices=GENDER_CHOICES, null=True, blank=True)

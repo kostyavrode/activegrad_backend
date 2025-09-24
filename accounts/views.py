@@ -67,7 +67,7 @@ class UpdateClothesAPIView(APIView):
             return Response({
                 "success": True,
                 "message": "Clothes updated successfully",
-                "clothes": serializer.data
+                "clothes": serializer.data,
             })
         return Response({
             "success": False,
