@@ -132,3 +132,49 @@ class GetPlayerInfoView(APIView):
                 }
             }
         }, status=status.HTTP_200_OK)
+
+
+class GetPlayerLandmarksView(APIView):
+    """
+    API endpoint для получения списка всех достопримечательностей по ID пользователя.
+    Возвращает только список external_ids (ID из Wikipedia API).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, player_id):
+        try:
+            player_id = int(player_id)
+        except (ValueError, TypeError):
+            return Response({
+                "success": False,
+                "error": "player_id must be a valid integer"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Получаем игрока
+        try:
+            player = User.objects.get(id=player_id)
+        except User.DoesNotExist:
+            return Response({
+                "success": False,
+                "error": f"Player with ID {player_id} not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Получаем достопримечательности игрока
+        try:
+            from landmarks.models import PlayerLandmarkObservation
+            observations = PlayerLandmarkObservation.objects.filter(player=player).order_by('-observed_at')
+            external_ids = [obs.external_id for obs in observations]
+        except Exception as e:
+            # Если landmarks app не доступен, возвращаем ошибку
+            return Response({
+                "success": False,
+                "error": "Landmarks service is not available"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({
+            "success": True,
+            "player_id": player.id,
+            "player_username": player.username,
+            "external_ids": external_ids,
+            "total_count": len(external_ids)
+        }, status=status.HTTP_200_OK)
