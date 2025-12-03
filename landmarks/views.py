@@ -2,10 +2,13 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
+import logging
 from .models import PlayerLandmarkObservation
 from .serializers import SavePlayerLandmarksSerializer
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class SavePlayerLandmarksView(APIView):
@@ -17,49 +20,69 @@ class SavePlayerLandmarksView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        serializer = SavePlayerLandmarksSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({
-                "success": False,
-                "errors": serializer.errors
-            }, status=400)
-
-        player_id = serializer.validated_data['player_id']
-        external_ids = serializer.validated_data['external_ids']
-
-        # Получаем игрока
         try:
-            player = User.objects.get(id=player_id)
-        except User.DoesNotExist:
+            serializer = SavePlayerLandmarksSerializer(data=request.data)
+            if not serializer.is_valid():
+                logger.warning(f"Invalid serializer data: {serializer.errors}")
+                return Response({
+                    "success": False,
+                    "errors": serializer.errors
+                }, status=400)
+
+            player_id = serializer.validated_data['player_id']
+            external_ids = serializer.validated_data['external_ids']
+
+            # Получаем игрока
+            try:
+                player = User.objects.get(id=player_id)
+            except User.DoesNotExist:
+                logger.warning(f"Player with ID {player_id} not found")
+                return Response({
+                    "success": False,
+                    "error": f"Player with ID {player_id} not found"
+                }, status=404)
+
+            # Сохраняем наблюдения (unique_together предотвращает дубликаты)
+            saved_external_ids = []
+            
+            for external_id in external_ids:
+                try:
+                    # Преобразуем в строку на случай, если пришло число
+                    external_id = str(external_id).strip()
+                    if not external_id:
+                        continue
+                        
+                    # Создаем или получаем наблюдение (unique_together предотвращает дубликаты)
+                    observation, created = PlayerLandmarkObservation.objects.get_or_create(
+                        player=player,
+                        external_id=external_id
+                    )
+                    if created:
+                        saved_external_ids.append(external_id)
+                except IntegrityError as e:
+                    logger.error(f"IntegrityError for external_id {external_id}: {str(e)}")
+                    # Пропускаем этот external_id и продолжаем
+                    continue
+                except Exception as e:
+                    logger.error(f"Error saving external_id {external_id}: {str(e)}")
+                    # Пропускаем этот external_id и продолжаем
+                    continue
+
+            return Response({
+                "success": True,
+                "message": f"Successfully saved {len(saved_external_ids)} landmark observation(s)",
+                "player_id": player_id,
+                "saved_external_ids": saved_external_ids,
+                "total_saved": len(saved_external_ids)
+            }, status=200)
+            
+        except Exception as e:
+            logger.error(f"Unexpected error in SavePlayerLandmarksView: {str(e)}", exc_info=True)
             return Response({
                 "success": False,
-                "error": f"Player with ID {player_id} not found"
-            }, status=404)
-
-        # Сохраняем наблюдения (unique_together предотвращает дубликаты)
-        saved_external_ids = []
-        
-        for external_id in external_ids:
-            # Убираем пробелы и проверяем, что external_id не пустой
-            external_id = external_id.strip()
-            if not external_id:
-                continue
-                
-            # Создаем или получаем наблюдение (unique_together предотвращает дубликаты)
-            observation, created = PlayerLandmarkObservation.objects.get_or_create(
-                player=player,
-                external_id=external_id
-            )
-            if created:
-                saved_external_ids.append(external_id)
-
-        return Response({
-            "success": True,
-            "message": f"Successfully saved {len(saved_external_ids)} landmark observation(s)",
-            "player_id": player_id,
-            "saved_external_ids": saved_external_ids,
-            "total_saved": len(saved_external_ids)
-        }, status=200)
+                "error": "Internal server error",
+                "message": str(e) if hasattr(e, '__str__') else "Unknown error"
+            }, status=500)
 
 
 class GetPlayerLandmarksView(APIView):
