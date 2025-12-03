@@ -1,38 +1,42 @@
 from rest_framework import serializers
-from .models import Landmark, PlayerLandmarkObservation
+from .models import PlayerLandmarkObservation
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
 
-class LandmarkSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Landmark
-        fields = ["id", "name", "description", "external_id"]
-
-
 class PlayerLandmarkObservationSerializer(serializers.ModelSerializer):
-    landmark = LandmarkSerializer(read_only=True)
-    landmark_id = serializers.IntegerField(write_only=True, required=False)
-    player_id = serializers.IntegerField(write_only=True, required=False)
+    """Сериализатор для модели наблюдения игрока в достопримечательности"""
+    player_id = serializers.IntegerField(read_only=True, source='player.id')
+    player_username = serializers.CharField(read_only=True, source='player.username')
     
     class Meta:
         model = PlayerLandmarkObservation
-        fields = ["id", "player_id", "landmark", "landmark_id", "observed_at"]
+        fields = ["id", "player_id", "player_username", "external_id", "observed_at"]
         read_only_fields = ["id", "observed_at"]
 
 
 class SavePlayerLandmarksSerializer(serializers.Serializer):
+    """
+    Сериализатор для сохранения достопримечательностей, где был игрок.
+    Принимает player_id и список external_ids (ID из Wikipedia API).
+    """
     player_id = serializers.IntegerField(required=True)
-    landmark_ids = serializers.ListField(
-        child=serializers.IntegerField(),
+    external_ids = serializers.ListField(
+        child=serializers.CharField(),
         required=True,
-        allow_empty=False
+        allow_empty=False,
+        help_text="Список ID достопримечательностей из Wikipedia API"
     )
 
 
 class PlayerLandmarksResponseSerializer(serializers.Serializer):
+    """Сериализатор для ответа с достопримечательностями игрока"""
     player_id = serializers.IntegerField()
     player_username = serializers.CharField()
-    landmarks = LandmarkSerializer(many=True)
+    external_ids = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="Список ID достопримечательностей, где был игрок"
+    )
+    total_count = serializers.IntegerField()
 

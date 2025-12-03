@@ -2,16 +2,17 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
-from .models import Landmark, PlayerLandmarkObservation
-from .serializers import SavePlayerLandmarksSerializer, LandmarkSerializer
+from .models import PlayerLandmarkObservation
+from .serializers import SavePlayerLandmarksSerializer
 
 User = get_user_model()
 
 
 class SavePlayerLandmarksView(APIView):
     """
-    API endpoint to save landmarks where a player has been observed.
-    Accepts player_id and a list of landmark_ids.
+    API endpoint для сохранения факта того, что игрок был в достопримечательности.
+    Принимает player_id и список external_ids (ID из Wikipedia API).
+    Названия и описания достопримечательностей получаются из Unity через Wikipedia API.
     """
     permission_classes = [IsAuthenticated]
 
@@ -24,9 +25,9 @@ class SavePlayerLandmarksView(APIView):
             }, status=400)
 
         player_id = serializer.validated_data['player_id']
-        landmark_ids = serializer.validated_data['landmark_ids']
+        external_ids = serializer.validated_data['external_ids']
 
-        # Get the player
+        # Получаем игрока
         try:
             player = User.objects.get(id=player_id)
         except User.DoesNotExist:
@@ -35,46 +36,42 @@ class SavePlayerLandmarksView(APIView):
                 "error": f"Player with ID {player_id} not found"
             }, status=404)
 
-        # Get or create landmarks
-        saved_landmarks = []
-        errors = []
+        # Сохраняем наблюдения (unique_together предотвращает дубликаты)
+        saved_external_ids = []
         
-        for landmark_id in landmark_ids:
-            try:
-                landmark = Landmark.objects.get(id=landmark_id)
-                # Create or get the observation (unique_together ensures no duplicates)
-                observation, created = PlayerLandmarkObservation.objects.get_or_create(
-                    player=player,
-                    landmark=landmark
-                )
-                if created:
-                    saved_landmarks.append(landmark_id)
-            except Landmark.DoesNotExist:
-                errors.append(f"Landmark with ID {landmark_id} not found")
+        for external_id in external_ids:
+            # Убираем пробелы и проверяем, что external_id не пустой
+            external_id = external_id.strip()
+            if not external_id:
+                continue
+                
+            # Создаем или получаем наблюдение (unique_together предотвращает дубликаты)
+            observation, created = PlayerLandmarkObservation.objects.get_or_create(
+                player=player,
+                external_id=external_id
+            )
+            if created:
+                saved_external_ids.append(external_id)
 
-        response_data = {
+        return Response({
             "success": True,
-            "message": f"Successfully saved {len(saved_landmarks)} landmark observation(s)",
+            "message": f"Successfully saved {len(saved_external_ids)} landmark observation(s)",
             "player_id": player_id,
-            "saved_landmark_ids": saved_landmarks
-        }
-        
-        if errors:
-            response_data["errors"] = errors
-            response_data["message"] += f" with {len(errors)} error(s)"
-
-        return Response(response_data, status=200 if not errors else 207)  # 207 Multi-Status if some failed
+            "saved_external_ids": saved_external_ids,
+            "total_saved": len(saved_external_ids)
+        }, status=200)
 
 
 class GetPlayerLandmarksView(APIView):
     """
-    API endpoint to retrieve all landmarks where a player has been observed.
-    Accepts player_id as a query parameter or in the URL path.
+    API endpoint для получения списка ID достопримечательностей, где был игрок.
+    Принимает player_id как query параметр или в URL path.
+    Возвращает список external_ids (ID из Wikipedia API).
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request, player_id=None):
-        # Get player_id from URL path or query parameter
+        # Получаем player_id из URL path или query параметра
         player_id = player_id or request.query_params.get('player_id')
         
         if not player_id:
@@ -91,7 +88,7 @@ class GetPlayerLandmarksView(APIView):
                 "error": "player_id must be a valid integer"
             }, status=400)
 
-        # Get the player
+        # Получаем игрока
         try:
             player = User.objects.get(id=player_id)
         except User.DoesNotExist:
@@ -100,16 +97,36 @@ class GetPlayerLandmarksView(APIView):
                 "error": f"Player with ID {player_id} not found"
             }, status=404)
 
-        # Get all landmarks where the player has been observed
-        observations = PlayerLandmarkObservation.objects.filter(player=player).select_related('landmark')
-        landmarks = [obs.landmark for obs in observations]
-
-        landmark_serializer = LandmarkSerializer(landmarks, many=True)
+        # Получаем все наблюдения игрока
+        observations = PlayerLandmarkObservation.objects.filter(player=player)
+        external_ids = [obs.external_id for obs in observations]
         
         return Response({
             "success": True,
             "player_id": player.id,
             "player_username": player.username,
-            "landmarks": landmark_serializer.data,
-            "total_count": len(landmarks)
+            "external_ids": external_ids,
+            "total_count": len(external_ids)
+        }, status=200)
+
+
+class TestLandmarksView(APIView):
+    """Тестовый endpoint для проверки доступности landmarks API"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response({
+            "status": "OK",
+            "message": "Landmarks API is working",
+            "user": request.user.username,
+            "user_id": request.user.id
+        }, status=200)
+    
+    def post(self, request):
+        return Response({
+            "status": "OK",
+            "message": "Landmarks API POST is working",
+            "user": request.user.username,
+            "user_id": request.user.id,
+            "received_data": request.data
         }, status=200)
