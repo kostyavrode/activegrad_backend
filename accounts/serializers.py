@@ -49,6 +49,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Добавляем данные о пользователе в ответ
         data['user'] = {
             "id": self.user.id,
+            "player_id": self.user.id,  # Явно добавляем player_id для удобства
             "username": self.user.username,
             "first_name": self.user.first_name,
             "last_name": self.user.last_name,

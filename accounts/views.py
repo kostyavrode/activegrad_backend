@@ -4,7 +4,10 @@ from rest_framework import status, permissions
 from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
+from django.contrib.auth import get_user_model
 from .serializers import UserRegistrationSerializer, UserLoginSerializer, UserClothesSerializer, CustomTokenObtainPairSerializer
+
+User = get_user_model()
 
 class CustomLoginView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
@@ -49,6 +52,7 @@ class LoginAPIView(APIView):
                 "message": "Login successful",
                 "user": {
                     "id": user.id,
+                    "player_id": user.id,  # Явно добавляем player_id для удобства
                     "username": user.username,
                     "first_name": user.first_name,
                     "last_name": user.last_name,
@@ -73,3 +77,58 @@ class UpdateClothesAPIView(APIView):
             "success": False,
             "errors": serializer.errors
         }, status=400)
+
+
+class GetPlayerInfoView(APIView):
+    """
+    API endpoint для получения информации о другом игроке по его ID.
+    Возвращает никнейм, имя, фамилию, дату регистрации, пол и список достопримечательностей.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, player_id):
+        try:
+            player_id = int(player_id)
+        except (ValueError, TypeError):
+            return Response({
+                "success": False,
+                "error": "player_id must be a valid integer"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Получаем игрока
+        try:
+            player = User.objects.get(id=player_id)
+        except User.DoesNotExist:
+            return Response({
+                "success": False,
+                "error": f"Player with ID {player_id} not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Получаем достопримечательности игрока
+        try:
+            from landmarks.models import PlayerLandmarkObservation
+            observations = PlayerLandmarkObservation.objects.filter(player=player)
+            external_ids = [obs.external_id for obs in observations]
+        except Exception:
+            # Если landmarks app не доступен, возвращаем пустой список
+            external_ids = []
+
+        # Форматируем дату регистрации
+        registration_date = player.registration_date.isoformat() if player.registration_date else None
+
+        return Response({
+            "success": True,
+            "player": {
+                "id": player.id,
+                "player_id": player.id,
+                "username": player.username,
+                "first_name": player.first_name or "",
+                "last_name": player.last_name or "",
+                "registration_date": registration_date,
+                "gender": player.gender if hasattr(player, 'gender') else None,
+                "landmarks": {
+                    "external_ids": external_ids,
+                    "total_count": len(external_ids)
+                }
+            }
+        }, status=status.HTTP_200_OK)
