@@ -1,29 +1,194 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
 from django.utils import timezone
+from django.db import transaction
+from django.contrib.auth import get_user_model
 import random
-from .models import Quest, DailyQuest
-from .serializers import QuestSerializer
+from .models import Quest, DailyQuest, QuestProgress
+from .serializers import QuestSerializer, QuestCompleteSerializer, QuestProgressSerializer
+
+User = get_user_model()
+
 
 class DailyQuestsView(APIView):
+    """
+    API endpoint для получения ежедневных квестов.
+    Квесты обновляются каждый день в 00:00 UTC.
+    Все квесты должны иметь поле type (не пустое, не null).
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         today = timezone.now().date()
         user = request.user
 
-        existing_quests = DailyQuest.objects.filter(user=user, date=today)
-        if existing_quests.exists():
-            quests = [dq.quest for dq in existing_quests]
+        # Проверяем существующие квесты на сегодня
+        existing_daily_quests = DailyQuest.objects.filter(user=user, date=today)
+        
+        if existing_daily_quests.exists():
+            # Получаем квесты из существующих связей
+            quests = [dq.quest for dq in existing_daily_quests.select_related('quest')]
         else:
-            all_quests = list(Quest.objects.all())
+            # Создаем новые квесты на сегодня
+            # Фильтруем только активные квесты с валидным type
+            all_quests = list(
+                Quest.objects.filter(
+                    is_active=True,
+                    type__isnull=False
+                ).exclude(type='')
+            )
+            
             if len(all_quests) < 3:
-                return Response({"error": "Not enough quests in database."}, status=400)
-            selected_quests = random.sample(all_quests, 3)
-            for q in selected_quests:
-                DailyQuest.objects.create(user=user, quest=q, date=today)
+                return Response({
+                    "error": "Not enough quests in database. Need at least 3 active quests with valid type."
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Выбираем случайные квесты (обычно 3-5)
+            num_quests = min(random.randint(3, 5), len(all_quests))
+            selected_quests = random.sample(all_quests, num_quests)
+            
+            # Создаем связи DailyQuest
+            for quest in selected_quests:
+                DailyQuest.objects.create(user=user, quest=quest, date=today)
+            
             quests = selected_quests
 
+        # Сериализуем квесты
         serializer = QuestSerializer(quests, many=True)
-        return Response({"quests": serializer.data})
+        
+        # Фильтруем None значения (квесты без type будут None после to_representation)
+        quests_data = [q for q in serializer.data if q is not None]
+        
+        # Дополнительная проверка: убеждаемся что все квесты имеют type
+        valid_quests = []
+        for quest_data in quests_data:
+            if quest_data.get('type') and quest_data['type'].strip() != '':
+                valid_quests.append(quest_data)
+            else:
+                # Логируем проблему (в продакшене можно использовать logger)
+                print(f"WARNING: Quest {quest_data.get('id')} has invalid type field")
+        
+        return Response({
+            "quests": valid_quests
+        }, status=status.HTTP_200_OK)
+
+
+class CompleteQuestView(APIView):
+    """
+    Опциональный API endpoint для подтверждения выполнения квеста.
+    Выдает награду пользователю.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, quest_id):
+        serializer = QuestCompleteSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "success": False,
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        player_id = serializer.validated_data['player_id']
+        user = request.user
+        
+        # Проверяем что player_id соответствует текущему пользователю
+        if user.id != player_id:
+            return Response({
+                "success": False,
+                "message": "player_id does not match authenticated user"
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        # Получаем квест
+        try:
+            quest = Quest.objects.get(id=quest_id, is_active=True)
+        except Quest.DoesNotExist:
+            return Response({
+                "success": False,
+                "message": "Quest not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        today = timezone.now().date()
+        
+        # Проверяем, не завершен ли уже квест
+        quest_progress, created = QuestProgress.objects.get_or_create(
+            user=user,
+            quest=quest,
+            date=today,
+            defaults={'current_progress': 0, 'is_completed': False, 'reward_claimed': False}
+        )
+        
+        if quest_progress.reward_claimed:
+            return Response({
+                "success": False,
+                "message": "Quest already completed and reward claimed"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Проверяем выполнение
+        if quest_progress.current_progress < quest.count:
+            return Response({
+                "success": False,
+                "message": f"Quest not completed. Progress: {quest_progress.current_progress}/{quest.count}"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Выдаем награду
+        reward_given = {
+            "type": quest.reward_type,
+            "amount": quest.reward_amount
+        }
+
+        if quest.reward_type == 'coins':
+            user.coins += quest.reward_amount
+            user.save()
+        elif quest.reward_type == 'experience':
+            # TODO: Добавить поле experience в CustomUser если нужно
+            # user.experience += quest.reward_amount
+            # user.save()
+            pass
+        elif quest.reward_type == 'item':
+            # TODO: Логика выдачи предмета по item_id
+            pass
+
+        # Отмечаем награду как полученную
+        quest_progress.reward_claimed = True
+        quest_progress.is_completed = True
+        quest_progress.save()
+
+        # Получаем обновленную статистику игрока
+        player_stats = {
+            "coins": user.coins,
+            # "experience": getattr(user, 'experience', 0),
+            # "level": getattr(user, 'level', 1)
+        }
+
+        return Response({
+            "success": True,
+            "message": "Quest completed successfully",
+            "reward_given": reward_given,
+            "player_stats": player_stats
+        }, status=status.HTTP_200_OK)
+
+
+class QuestProgressView(APIView):
+    """
+    Опциональный API endpoint для получения прогресса квестов пользователя.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        today = timezone.now().date()
+        
+        # Получаем прогресс всех квестов на сегодня
+        progress_list = QuestProgress.objects.filter(
+            user=user,
+            date=today
+        ).select_related('quest')
+        
+        serializer = QuestProgressSerializer(progress_list, many=True)
+        
+        return Response({
+            "quests_progress": serializer.data
+        }, status=status.HTTP_200_OK)
