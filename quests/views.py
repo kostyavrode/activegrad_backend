@@ -15,8 +15,17 @@ User = get_user_model()
 class DailyQuestsView(APIView):
     """
     API endpoint для получения ежедневных квестов.
+    
     Квесты обновляются каждый день в 00:00 UTC.
     Все квесты должны иметь поле type (не пустое, не null).
+    
+    **Требования:**
+    - Аутентификация обязательна (Bearer token)
+    
+    **Ответ:**
+    - 200 OK: Список квестов с обязательными полями (id, type, title, description, count, reward_type, reward_amount)
+    - 400 Bad Request: Недостаточно квестов в базе данных
+    - 401 Unauthorized: Требуется аутентификация
     """
     permission_classes = [IsAuthenticated]
 
@@ -79,6 +88,18 @@ class CompleteQuestView(APIView):
     """
     Опциональный API endpoint для подтверждения выполнения квеста.
     Выдает награду пользователю.
+    
+    **Требования:**
+    - Аутентификация обязательна (Bearer token)
+    - player_id должен соответствовать текущему пользователю
+    - Квест должен быть выполнен (current_progress >= required_count)
+    - Награда не должна быть уже получена
+    
+    **Ответ:**
+    - 200 OK: Квест успешно завершен, награда выдана
+    - 400 Bad Request: Квест уже завершен или не выполнен
+    - 403 Forbidden: player_id не соответствует пользователю
+    - 404 Not Found: Квест не найден
     """
     permission_classes = [IsAuthenticated]
 
@@ -174,6 +195,15 @@ class CompleteQuestView(APIView):
 class QuestProgressView(APIView):
     """
     Опциональный API endpoint для получения прогресса квестов пользователя.
+    
+    Возвращает прогресс всех квестов на текущий день.
+    
+    **Требования:**
+    - Аутентификация обязательна (Bearer token)
+    
+    **Ответ:**
+    - 200 OK: Список прогресса квестов с полями (quest_id, current_progress, required_count, is_completed, reward_claimed)
+    - 401 Unauthorized: Требуется аутентификация
     """
     permission_classes = [IsAuthenticated]
 

@@ -7,25 +7,34 @@ class QuestAdmin(admin.ModelAdmin):
     list_display = ("id", "type", "title", "count", "reward_type", "reward_amount", "is_active", "created_at")
     list_filter = ("type", "reward_type", "is_active", "created_at")
     search_fields = ("title", "description", "type")
-    fieldsets = (
-        ("Основная информация", {
-            "fields": ("type", "title", "description", "count", "is_active")
-        }),
-        ("Награда", {
-            "fields": ("reward_type", "reward_amount", "item_id")
-        }),
-        ("Системная информация", {
-            "fields": ("created_at", "updated_at"),
-            "classes": ("collapse",)
-        }),
-    )
     readonly_fields = ("created_at", "updated_at")
     
-    def get_readonly_fields(self, request, obj=None):
-        # При создании не показываем системные поля
+    def get_fieldsets(self, request, obj=None):
+        """Настраиваем fieldsets в зависимости от того, создаем или редактируем объект"""
         if obj is None:
-            return []
-        return self.readonly_fields
+            # При создании нового объекта не показываем системные поля
+            return (
+                ("Основная информация", {
+                    "fields": ("type", "title", "description", "count", "is_active")
+                }),
+                ("Награда", {
+                    "fields": ("reward_type", "reward_amount", "item_id")
+                }),
+            )
+        else:
+            # При редактировании показываем системные поля как readonly
+            return (
+                ("Основная информация", {
+                    "fields": ("type", "title", "description", "count", "is_active")
+                }),
+                ("Награда", {
+                    "fields": ("reward_type", "reward_amount", "item_id")
+                }),
+                ("Системная информация", {
+                    "fields": ("created_at", "updated_at"),
+                    "classes": ("collapse",)
+                }),
+            )
 
 
 @admin.register(DailyQuest)
