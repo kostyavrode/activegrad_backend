@@ -193,15 +193,21 @@ class CompleteQuestView(APIView):
             "experience_to_next_level": user.get_experience_to_next_level()
         }
         
-        # Добавляем информацию о повышении уровня, если было
+        # Формируем сообщение с учетом повышения уровня
+        message = "Quest completed successfully"
         if level_info:
             player_stats['level_up'] = level_info
+            if level_info['levels_gained'] == 1:
+                message = f"Quest completed! Level up! You reached level {level_info['new_level']}!"
+            else:
+                message = f"Quest completed! Level up! You gained {level_info['levels_gained']} levels and reached level {level_info['new_level']}!"
 
         return Response({
             "success": True,
-            "message": "Quest completed successfully",
+            "message": message,
             "reward_given": reward_given,
-            "player_stats": player_stats
+            "player_stats": player_stats,
+            "level_up_notification": level_info if level_info else None  # Явное уведомление о повышении уровня
         }, status=status.HTTP_200_OK)
 
 

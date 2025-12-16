@@ -182,3 +182,32 @@ class GetPlayerLandmarksView(APIView):
             "external_ids": external_ids,
             "total_count": len(external_ids)
         }, status=status.HTTP_200_OK)
+
+
+class GetCurrentUserStatsView(APIView):
+    """
+    API endpoint для получения статистики текущего авторизованного пользователя.
+    Возвращает монеты, опыт, уровень и другую информацию.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        
+        return Response({
+            "success": True,
+            "player_stats": {
+                "id": user.id,
+                "player_id": user.id,
+                "username": user.username,
+                "coins": user.coins,
+                "experience": user.experience,
+                "level": user.level,
+                "experience_to_next_level": user.get_experience_to_next_level(),
+                "experience_per_level": user.EXPERIENCE_PER_LEVEL,
+                "progress_to_next_level_percent": round(
+                    (user.experience / user.EXPERIENCE_PER_LEVEL) * 100, 
+                    2
+                ) if user.EXPERIENCE_PER_LEVEL > 0 else 0
+            }
+        }, status=status.HTTP_200_OK)
