@@ -56,6 +56,10 @@ class LoginAPIView(APIView):
                     "username": user.username,
                     "first_name": user.first_name,
                     "last_name": user.last_name,
+                    "coins": user.coins,
+                    "experience": user.experience,
+                    "level": user.level,
+                    "experience_to_next_level": user.get_experience_to_next_level(),
                 }
             }, status=status.HTTP_200_OK)
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)

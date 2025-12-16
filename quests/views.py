@@ -159,18 +159,26 @@ class CompleteQuestView(APIView):
             "type": quest.reward_type,
             "amount": quest.reward_amount
         }
+        
+        level_info = None
 
         if quest.reward_type == 'coins':
-            user.coins += quest.reward_amount
-            user.save()
+            new_coins = user.add_coins(quest.reward_amount)
+            reward_given['new_balance'] = new_coins
         elif quest.reward_type == 'experience':
-            # TODO: Добавить поле experience в CustomUser если нужно
-            # user.experience += quest.reward_amount
-            # user.save()
-            pass
+            exp_result = user.add_experience(quest.reward_amount)
+            reward_given['new_experience'] = exp_result['experience']
+            if exp_result['leveled_up']:
+                level_info = {
+                    'new_level': exp_result['level'],
+                    'levels_gained': exp_result['levels_gained']
+                }
         elif quest.reward_type == 'item':
             # TODO: Логика выдачи предмета по item_id
             pass
+        
+        # Обновляем пользователя из БД для получения актуальных данных
+        user.refresh_from_db()
 
         # Отмечаем награду как полученную
         quest_progress.reward_claimed = True
@@ -180,9 +188,14 @@ class CompleteQuestView(APIView):
         # Получаем обновленную статистику игрока
         player_stats = {
             "coins": user.coins,
-            # "experience": getattr(user, 'experience', 0),
-            # "level": getattr(user, 'level', 1)
+            "experience": user.experience,
+            "level": user.level,
+            "experience_to_next_level": user.get_experience_to_next_level()
         }
+        
+        # Добавляем информацию о повышении уровня, если было
+        if level_info:
+            player_stats['level_up'] = level_info
 
         return Response({
             "success": True,
