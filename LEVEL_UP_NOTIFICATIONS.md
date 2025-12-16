@@ -77,7 +77,7 @@
 
 ## 2. Получение статистики пользователя
 
-### Endpoint: `GET /api/me/stats/`
+### Endpoint: `GET /api/player/stats/`
 
 Получение текущей статистики авторизованного пользователя.
 
@@ -111,6 +111,61 @@ Authorization: Bearer {access_token}
 - `experience_to_next_level` - сколько опыта нужно до следующего уровня
 - `experience_per_level` - константа (1000 опыта = 1 уровень)
 - `progress_to_next_level_percent` - прогресс до следующего уровня в процентах
+
+---
+
+## 2.1. Получение только монет (легковесный endpoint)
+
+### Endpoint: `GET /api/player/coins/`
+
+Получение только количества монет текущего авторизованного пользователя. Используется для быстрой проверки баланса без загрузки полной статистики.
+
+**Headers:**
+```
+Authorization: Bearer {access_token}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "coins": 500,
+  "player_id": 1
+}
+```
+
+**Поля:**
+- `coins` - текущее количество монет
+- `player_id` - ID игрока
+
+**Пример использования в Unity:**
+
+```csharp
+[Serializable]
+public class CoinsResponse
+{
+    public bool success;
+    public int coins;
+    public int player_id;
+}
+
+public async Task<int> GetCurrentUserCoins()
+{
+    var response = await apiClient.GetAsync<CoinsResponse>("/api/player/coins/");
+    if (response.success)
+    {
+        return response.coins;
+    }
+    return -1; // Ошибка
+}
+
+// Использование
+int coins = await GetCurrentUserCoins();
+if (coins >= 0)
+{
+    Debug.Log($"Current coins: {coins}");
+}
+```
 
 ---
 
@@ -217,7 +272,7 @@ public class UserStatsResponse
 
 public async Task<UserStatsResponse> GetCurrentUserStats()
 {
-    return await apiClient.GetAsync<UserStatsResponse>("/api/me/stats/");
+    return await apiClient.GetAsync<UserStatsResponse>("/api/player/stats/");
 }
 
 // Использование

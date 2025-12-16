@@ -211,3 +211,20 @@ class GetCurrentUserStatsView(APIView):
                 ) if user.EXPERIENCE_PER_LEVEL > 0 else 0
             }
         }, status=status.HTTP_200_OK)
+
+
+class GetCurrentUserCoinsView(APIView):
+    """
+    API endpoint для получения только количества монет текущего авторизованного пользователя.
+    Легковесный endpoint для быстрой проверки баланса.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        
+        return Response({
+            "success": True,
+            "coins": user.coins,
+            "player_id": user.id
+        }, status=status.HTTP_200_OK)
