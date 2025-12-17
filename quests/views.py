@@ -276,10 +276,12 @@ class QuestPromoCodesView(APIView):
     """
     API endpoint для получения списка промокодов, полученных игроком за выполнение квестов.
     
-    Возвращает промокоды с информацией о квестах (название, описание, картинка).
+    Возвращает промокоды текущего пользователя (определяется по JWT токену) 
+    с информацией о квестах (название, описание, картинка).
     
     **Требования:**
     - Аутентификация обязательна (Bearer token)
+    - Пользователь может получить только свои промокоды
     
     **Ответ:**
     - 200 OK: Список промокодов с информацией о квестах
@@ -288,6 +290,7 @@ class QuestPromoCodesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # Используем пользователя из токена аутентификации
         user = request.user
         
         # Получаем все промокоды игрока, отсортированные по дате получения (новые первыми)
@@ -299,6 +302,7 @@ class QuestPromoCodesView(APIView):
         
         return Response({
             "success": True,
+            "player_id": user.id,
             "promo_codes": serializer.data,
             "total_count": len(serializer.data)
         }, status=status.HTTP_200_OK)
