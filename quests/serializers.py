@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Quest, QuestProgress, DailyQuest
+from .models import Quest, QuestProgress, DailyQuest, QuestPromoCode
 
 
 class QuestSerializer(serializers.ModelSerializer):
@@ -14,7 +14,9 @@ class QuestSerializer(serializers.ModelSerializer):
             "description",
             "count",
             "reward_type",
-            "reward_amount"
+            "reward_amount",
+            "promo_code",
+            "image_url"
         ]
         read_only_fields = ["id"]
     
@@ -67,3 +69,25 @@ class QuestProgressSerializer(serializers.ModelSerializer):
             "is_completed",
             "reward_claimed"
         ]
+
+
+class QuestPromoCodeSerializer(serializers.ModelSerializer):
+    """Сериализатор для промокода, полученного за квест"""
+    quest_id = serializers.IntegerField(source='quest.id', read_only=True)
+    quest_title = serializers.CharField(source='quest.title', read_only=True)
+    quest_description = serializers.CharField(source='quest.description', read_only=True)
+    quest_image_url = serializers.URLField(source='quest.image_url', read_only=True)
+    
+    class Meta:
+        model = QuestPromoCode
+        fields = [
+            'id',
+            'quest_id',
+            'quest_title',
+            'quest_description',
+            'quest_image_url',
+            'promo_code',
+            'date',
+            'obtained_at'
+        ]
+        read_only_fields = ['id', 'obtained_at']

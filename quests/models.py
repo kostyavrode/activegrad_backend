@@ -50,6 +50,20 @@ class Quest(models.Model):
         help_text="ID предмета (требуется если reward_type='item')"
     )
     
+    # Поля для промокодов и изображений
+    promo_code = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Промокод, который выдается за выполнение квеста"
+    )
+    image_url = models.URLField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="URL картинки квеста"
+    )
+    
     # Дополнительные поля
     is_active = models.BooleanField(default=True, help_text="Активен ли квест")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -133,3 +147,48 @@ class QuestProgress(models.Model):
     def __str__(self):
         status = "✓" if self.is_completed else "○"
         return f"{self.user.username} - {self.quest.title} {status} ({self.current_progress}/{self.quest.count})"
+
+
+class QuestPromoCode(models.Model):
+    """
+    Модель для хранения промокодов, полученных пользователем за выполнение квестов.
+    """
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='quest_promo_codes',
+        verbose_name="Пользователь"
+    )
+    quest = models.ForeignKey(
+        Quest,
+        on_delete=models.CASCADE,
+        related_name='promo_codes_issued',
+        verbose_name="Квест"
+    )
+    promo_code = models.CharField(max_length=100, verbose_name="Промокод")
+    quest_progress = models.ForeignKey(
+        QuestProgress,
+        on_delete=models.SET_NULL,
+        related_name='promo_code_issued',
+        null=True,
+        blank=True,
+        verbose_name="Прогресс квеста",
+        help_text="Связь с конкретным выполнением квеста"
+    )
+    date = models.DateField(
+        verbose_name="Дата получения",
+        help_text="Дата, когда был выполнен квест и получен промокод"
+    )
+    obtained_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="Дата и время получения"
+    )
+    
+    class Meta:
+        verbose_name = "Промокод за квест"
+        verbose_name_plural = "Промокоды за квесты"
+        ordering = ['-obtained_at']
+        unique_together = ('user', 'quest', 'date', 'promo_code')  # Предотвращает дубликаты
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.promo_code} ({self.quest.title}, {self.date})"

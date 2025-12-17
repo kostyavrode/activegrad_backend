@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Quest, DailyQuest, QuestProgress
+from .models import Quest, DailyQuest, QuestProgress, QuestPromoCode
 
 
 @admin.register(Quest)
@@ -20,6 +20,9 @@ class QuestAdmin(admin.ModelAdmin):
                 ("Награда", {
                     "fields": ("reward_type", "reward_amount", "item_id")
                 }),
+                ("Промокод и изображение", {
+                    "fields": ("promo_code", "image_url")
+                }),
             )
         else:
             # При редактировании показываем системные поля как readonly
@@ -29,6 +32,9 @@ class QuestAdmin(admin.ModelAdmin):
                 }),
                 ("Награда", {
                     "fields": ("reward_type", "reward_amount", "item_id")
+                }),
+                ("Промокод и изображение", {
+                    "fields": ("promo_code", "image_url")
                 }),
                 ("Системная информация", {
                     "fields": ("created_at", "updated_at"),
@@ -52,3 +58,12 @@ class QuestProgressAdmin(admin.ModelAdmin):
     search_fields = ("user__username", "quest__title")
     date_hierarchy = "date"
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(QuestPromoCode)
+class QuestPromoCodeAdmin(admin.ModelAdmin):
+    list_display = ("user", "quest", "promo_code", "date", "obtained_at")
+    list_filter = ("date", "quest__type")
+    search_fields = ("user__username", "quest__title", "promo_code")
+    date_hierarchy = "obtained_at"
+    readonly_fields = ("obtained_at",)
