@@ -3,9 +3,11 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
+from django.utils import timezone
 import logging
 from .models import PlayerLandmarkObservation
 from .serializers import SavePlayerLandmarksSerializer
+from quests.models import Quest, QuestProgress, DailyQuest
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -44,6 +46,7 @@ class SavePlayerLandmarksView(APIView):
 
             # Сохраняем наблюдения (unique_together предотвращает дубликаты)
             saved_external_ids = []
+            newly_created_count = 0
             
             for external_id in external_ids:
                 try:
@@ -59,6 +62,7 @@ class SavePlayerLandmarksView(APIView):
                     )
                     if created:
                         saved_external_ids.append(external_id)
+                        newly_created_count += 1
                 except IntegrityError as e:
                     logger.error(f"IntegrityError for external_id {external_id}: {str(e)}")
                     # Пропускаем этот external_id и продолжаем
@@ -67,6 +71,66 @@ class SavePlayerLandmarksView(APIView):
                     logger.error(f"Error saving external_id {external_id}: {str(e)}")
                     # Пропускаем этот external_id и продолжаем
                     continue
+
+            # Обновляем прогресс квестов типа 'mark_sights'
+            if newly_created_count > 0:
+                try:
+                    today = timezone.now().date()
+                    
+                    # Находим все активные квесты типа 'mark_sights' для игрока
+                    # Получаем квесты через DailyQuest для текущей даты
+                    daily_quests = DailyQuest.objects.filter(
+                        user=player,
+                        date=today,
+                        quest__type='mark_sights',
+                        quest__is_active=True
+                    ).select_related('quest')
+                    
+                    # Обновляем прогресс для каждого квеста
+                    for daily_quest in daily_quests:
+                        quest = daily_quest.quest
+                        
+                        # Получаем или создаем QuestProgress
+                        quest_progress, created = QuestProgress.objects.get_or_create(
+                            user=player,
+                            quest=quest,
+                            date=today,
+                            defaults={
+                                'current_progress': 0,
+                                'is_completed': False,
+                                'reward_claimed': False,
+                                'daily_quest': daily_quest
+                            }
+                        )
+                        
+                        # Если QuestProgress уже существовал, обновляем daily_quest если нужно
+                        if not created and not quest_progress.daily_quest:
+                            quest_progress.daily_quest = daily_quest
+                        
+                        # Увеличиваем прогресс (но не больше требуемого количества)
+                        new_progress = min(
+                            quest_progress.current_progress + newly_created_count,
+                            quest.count
+                        )
+                        quest_progress.current_progress = new_progress
+                        
+                        # Проверяем, выполнен ли квест
+                        if new_progress >= quest.count:
+                            quest_progress.is_completed = True
+                        
+                        quest_progress.save()
+                        
+                        logger.info(
+                            f"Updated quest progress for player {player_id}, "
+                            f"quest {quest.id}: {quest_progress.current_progress}/{quest.count}"
+                        )
+                        
+                except Exception as e:
+                    # Логируем ошибку, но не прерываем сохранение достопримечательностей
+                    logger.error(
+                        f"Error updating quest progress for player {player_id}: {str(e)}",
+                        exc_info=True
+                    )
 
             return Response({
                 "success": True,
