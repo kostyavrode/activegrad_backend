@@ -5,9 +5,16 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.contrib.auth import get_user_model
-from .serializers import UserRegistrationSerializer, UserLoginSerializer, UserClothesSerializer, CustomTokenObtainPairSerializer
+from django.db.models import Q
 
 User = get_user_model()
+CustomUser = User  # Для совместимости
+from .serializers import (
+    UserRegistrationSerializer, UserLoginSerializer, UserClothesSerializer, 
+    CustomTokenObtainPairSerializer, FriendRequestSerializer, SendFriendRequestSerializer,
+    FriendshipSerializer, UserBasicSerializer
+)
+from .models import FriendRequest, Friendship
 
 class CustomLoginView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
@@ -227,4 +234,284 @@ class GetCurrentUserCoinsView(APIView):
             "success": True,
             "coins": user.coins,
             "player_id": user.id
+        }, status=status.HTTP_200_OK)
+
+
+# ========== FRIEND SYSTEM VIEWS ==========
+
+class SendFriendRequestView(APIView):
+    """
+    API endpoint для отправки запроса дружбы другому пользователю.
+    POST /api/friends/requests/send/
+    Body: {"to_user_id": 123}
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = SendFriendRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "success": False,
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        from_user = request.user
+        to_user_id = serializer.validated_data['to_user_id']
+        
+        try:
+            to_user = User.objects.get(id=to_user_id)
+        except User.DoesNotExist:
+            return Response({
+                "success": False,
+                "error": "User not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Проверяем, что пользователь не отправляет запрос самому себе
+        if from_user == to_user:
+            return Response({
+                "success": False,
+                "error": "Cannot send friend request to yourself"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Проверяем, не являются ли они уже друзьями
+        if Friendship.are_friends(from_user, to_user):
+            return Response({
+                "success": False,
+                "error": "You are already friends with this user"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Проверяем, есть ли уже активный запрос
+        existing_request = FriendRequest.objects.filter(
+            (Q(from_user=from_user) & Q(to_user=to_user)) |
+            (Q(from_user=to_user) & Q(to_user=from_user)),
+            status='pending'
+        ).first()
+        
+        if existing_request:
+            if existing_request.from_user == from_user:
+                return Response({
+                    "success": False,
+                    "error": "Friend request already sent"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                return Response({
+                    "success": False,
+                    "error": "This user has already sent you a friend request. Please accept it instead."
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Создаём новый запрос
+        friend_request = FriendRequest.objects.create(
+            from_user=from_user,
+            to_user=to_user,
+            status='pending'
+        )
+        
+        return Response({
+            "success": True,
+            "message": "Friend request sent successfully",
+            "friend_request": FriendRequestSerializer(friend_request).data
+        }, status=status.HTTP_201_CREATED)
+
+
+class AcceptFriendRequestView(APIView):
+    """
+    API endpoint для принятия запроса дружбы.
+    POST /api/friends/requests/<request_id>/accept/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, request_id):
+        try:
+            friend_request = FriendRequest.objects.get(id=request_id, status='pending')
+        except FriendRequest.DoesNotExist:
+            return Response({
+                "success": False,
+                "error": "Friend request not found or already processed"
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Проверяем, что текущий пользователь - получатель запроса
+        if friend_request.to_user != request.user:
+            return Response({
+                "success": False,
+                "error": "You are not authorized to accept this request"
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Проверяем, не являются ли они уже друзьями
+        if Friendship.are_friends(friend_request.from_user, friend_request.to_user):
+            friend_request.status = 'accepted'
+            friend_request.save()
+            return Response({
+                "success": False,
+                "error": "You are already friends"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Создаём дружбу (порядок user1 < user2 для избежания дубликатов)
+        user1, user2 = sorted([friend_request.from_user, friend_request.to_user], key=lambda u: u.id)
+        friendship = Friendship.objects.create(user1=user1, user2=user2)
+        
+        # Обновляем статус запроса
+        friend_request.status = 'accepted'
+        friend_request.save()
+        
+        return Response({
+            "success": True,
+            "message": "Friend request accepted",
+            "friendship": FriendshipSerializer(friendship, context={'request': request}).data
+        }, status=status.HTTP_200_OK)
+
+
+class RejectFriendRequestView(APIView):
+    """
+    API endpoint для отклонения запроса дружбы.
+    POST /api/friends/requests/<request_id>/reject/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, request_id):
+        try:
+            friend_request = FriendRequest.objects.get(id=request_id, status='pending')
+        except FriendRequest.DoesNotExist:
+            return Response({
+                "success": False,
+                "error": "Friend request not found or already processed"
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Проверяем, что текущий пользователь - получатель запроса
+        if friend_request.to_user != request.user:
+            return Response({
+                "success": False,
+                "error": "You are not authorized to reject this request"
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Обновляем статус запроса
+        friend_request.status = 'rejected'
+        friend_request.save()
+        
+        return Response({
+            "success": True,
+            "message": "Friend request rejected"
+        }, status=status.HTTP_200_OK)
+
+
+class GetFriendsListView(APIView):
+    """
+    API endpoint для получения списка всех друзей текущего пользователя.
+    GET /api/friends/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        friends = Friendship.get_friends(user)
+        
+        # Формируем список дружеских отношений с информацией о друге
+        friendships = Friendship.objects.filter(
+            Q(user1=user) | Q(user2=user)
+        )
+        
+        serializer = FriendshipSerializer(friendships, many=True, context={'request': request})
+        
+        # Извлекаем только информацию о друзьях из сериализатора
+        friends_data = []
+        for item in serializer.data:
+            if item.get('friend'):
+                friends_data.append(item['friend'])
+        
+        return Response({
+            "success": True,
+            "friends": friends_data,
+            "total_count": len(friends_data)
+        }, status=status.HTTP_200_OK)
+
+
+class GetPendingFriendRequestsView(APIView):
+    """
+    API endpoint для получения входящих запросов дружбы (которые отправили текущему пользователю).
+    GET /api/friends/requests/pending/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        pending_requests = FriendRequest.objects.filter(
+            to_user=user,
+            status='pending'
+        ).order_by('-created_at')
+        
+        serializer = FriendRequestSerializer(pending_requests, many=True)
+        
+        return Response({
+            "success": True,
+            "pending_requests": serializer.data,
+            "total_count": len(serializer.data)
+        }, status=status.HTTP_200_OK)
+
+
+class GetSentFriendRequestsView(APIView):
+    """
+    API endpoint для получения отправленных запросов дружбы (которые отправил текущий пользователь).
+    GET /api/friends/requests/sent/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        sent_requests = FriendRequest.objects.filter(
+            from_user=user,
+            status='pending'
+        ).order_by('-created_at')
+        
+        serializer = FriendRequestSerializer(sent_requests, many=True)
+        
+        return Response({
+            "success": True,
+            "sent_requests": serializer.data,
+            "total_count": len(serializer.data)
+        }, status=status.HTTP_200_OK)
+
+
+class RemoveFriendView(APIView):
+    """
+    API endpoint для удаления друга.
+    DELETE /api/friends/<friend_id>/remove/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, friend_id):
+        try:
+            friend = User.objects.get(id=friend_id)
+        except User.DoesNotExist:
+            return Response({
+                "success": False,
+                "error": "User not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        user = request.user
+        
+        # Проверяем, являются ли они друзьями
+        if not Friendship.are_friends(user, friend):
+            return Response({
+                "success": False,
+                "error": "You are not friends with this user"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Удаляем дружбу
+        friendship = Friendship.objects.filter(
+            (Q(user1=user) & Q(user2=friend)) |
+            (Q(user1=friend) & Q(user2=user))
+        ).first()
+        
+        if friendship:
+            friendship.delete()
+            
+            # Также обновляем статус всех связанных запросов дружбы
+            FriendRequest.objects.filter(
+                ((Q(from_user=user) & Q(to_user=friend)) |
+                 (Q(from_user=friend) & Q(to_user=user))),
+                status='accepted'
+            ).update(status='cancelled')
+        
+        return Response({
+            "success": True,
+            "message": "Friend removed successfully"
         }, status=status.HTTP_200_OK)

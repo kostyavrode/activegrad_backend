@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
-from .models import CustomUser
+from .models import CustomUser, FriendRequest, Friendship
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -87,3 +87,57 @@ class UserClothesSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
         fields = ["boots", "pants", "tshirt", "cap", "gender"]
+
+
+class UserBasicSerializer(serializers.ModelSerializer):
+    """Базовый сериализатор для отображения информации о пользователе в списках друзей."""
+    class Meta:
+        model = CustomUser
+        fields = ["id", "username", "first_name", "last_name", "level", "gender"]
+
+
+class FriendRequestSerializer(serializers.ModelSerializer):
+    """Сериализатор для запросов дружбы."""
+    from_user = UserBasicSerializer(read_only=True)
+    to_user = UserBasicSerializer(read_only=True)
+    from_user_id = serializers.IntegerField(write_only=True, required=False)
+    to_user_id = serializers.IntegerField(write_only=True, required=False)
+    
+    class Meta:
+        model = FriendRequest
+        fields = ["id", "from_user", "to_user", "from_user_id", "to_user_id", "status", "created_at", "updated_at"]
+        read_only_fields = ["id", "from_user", "to_user", "status", "created_at", "updated_at"]
+
+
+class SendFriendRequestSerializer(serializers.Serializer):
+    """Сериализатор для отправки запроса дружбы."""
+    to_user_id = serializers.IntegerField(required=True)
+    
+    def validate_to_user_id(self, value):
+        """Проверяет, что пользователь существует и не является текущим пользователем."""
+        try:
+            user = CustomUser.objects.get(id=value)
+        except CustomUser.DoesNotExist:
+            raise serializers.ValidationError("User not found")
+        return value
+
+
+class FriendshipSerializer(serializers.ModelSerializer):
+    """Сериализатор для дружеских отношений."""
+    user1 = UserBasicSerializer(read_only=True)
+    user2 = UserBasicSerializer(read_only=True)
+    friend = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Friendship
+        fields = ["id", "user1", "user2", "friend", "created_at"]
+        read_only_fields = ["id", "user1", "user2", "friend", "created_at"]
+    
+    def get_friend(self, obj):
+        """Возвращает информацию о друге (другой пользователь в дружбе)."""
+        request = self.context.get('request')
+        if request and request.user:
+            # Возвращаем другого пользователя (не текущего)
+            friend = obj.user2 if obj.user1 == request.user else obj.user1
+            return UserBasicSerializer(friend).data
+        return None

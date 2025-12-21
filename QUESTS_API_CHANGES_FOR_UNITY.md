@@ -811,3 +811,8 @@ public static class RewardTypes
 **Дата:** 2024  
 **Статус:** Готово к интеграции
 
+
+
+
+
+

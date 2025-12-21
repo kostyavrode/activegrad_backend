@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 class CustomUser(AbstractUser):
@@ -86,3 +87,96 @@ class CustomUser(AbstractUser):
     class Meta:
         verbose_name = "Пользователь"
         verbose_name_plural = "Пользователи"
+
+
+class FriendRequest(models.Model):
+    """
+    Модель для запросов дружбы между пользователями.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+        ('cancelled', 'Cancelled'),
+    ]
+    
+    from_user = models.ForeignKey(
+        CustomUser,
+        related_name='sent_friend_requests',
+        on_delete=models.CASCADE,
+        verbose_name="Отправитель"
+    )
+    to_user = models.ForeignKey(
+        CustomUser,
+        related_name='received_friend_requests',
+        on_delete=models.CASCADE,
+        verbose_name="Получатель"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending',
+        verbose_name="Статус"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
+    
+    class Meta:
+        verbose_name = "Запрос дружбы"
+        verbose_name_plural = "Запросы дружбы"
+        unique_together = ['from_user', 'to_user']
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.from_user.username} -> {self.to_user.username} ({self.status})"
+
+
+class Friendship(models.Model):
+    """
+    Модель для подтверждённых дружеских отношений.
+    Хранит симметричную связь между двумя пользователями.
+    """
+    user1 = models.ForeignKey(
+        CustomUser,
+        related_name='friendships_as_user1',
+        on_delete=models.CASCADE,
+        verbose_name="Пользователь 1"
+    )
+    user2 = models.ForeignKey(
+        CustomUser,
+        related_name='friendships_as_user2',
+        on_delete=models.CASCADE,
+        verbose_name="Пользователь 2"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
+    
+    class Meta:
+        verbose_name = "Дружба"
+        verbose_name_plural = "Дружбы"
+        unique_together = ['user1', 'user2']
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.user1.username} <-> {self.user2.username}"
+    
+    @staticmethod
+    def are_friends(user1, user2):
+        """Проверяет, являются ли два пользователя друзьями."""
+        return Friendship.objects.filter(
+            (Q(user1=user1) & Q(user2=user2)) |
+            (Q(user1=user2) & Q(user2=user1))
+        ).exists()
+    
+    @staticmethod
+    def get_friends(user):
+        """Получает всех друзей пользователя."""
+        friendships = Friendship.objects.filter(
+            Q(user1=user) | Q(user2=user)
+        )
+        friends = []
+        for friendship in friendships:
+            if friendship.user1 == user:
+                friends.append(friendship.user2)
+            else:
+                friends.append(friendship.user1)
+        return friends
