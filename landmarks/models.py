@@ -44,7 +44,7 @@ class LandmarkCapture(models.Model):
         verbose_name="Игрок, который захватил"
     )
     clan = models.ForeignKey(
-        'accounts.Clan',
+        'clans.Clan',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

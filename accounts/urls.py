@@ -3,8 +3,7 @@ from .views import (
     RegisterAPIView, LoginAPIView, CustomLoginView, UpdateClothesAPIView, 
     GetPlayerInfoView, GetPlayerLandmarksView, GetCurrentUserStatsView, GetCurrentUserCoinsView,
     SendFriendRequestView, AcceptFriendRequestView, RejectFriendRequestView,
-    GetFriendsListView, GetPendingFriendRequestsView, GetSentFriendRequestsView, RemoveFriendView,
-    CreateClanView, JoinClanView, LeaveClanView, SearchClansView, TopClansView
+    GetFriendsListView, GetPendingFriendRequestsView, GetSentFriendRequestsView, RemoveFriendView
 )
 
 
@@ -25,11 +24,4 @@ urlpatterns = [
     path("friends/requests/<int:request_id>/accept/", AcceptFriendRequestView.as_view(), name="accept-friend-request"),
     path("friends/requests/<int:request_id>/reject/", RejectFriendRequestView.as_view(), name="reject-friend-request"),
     path("friends/<int:friend_id>/remove/", RemoveFriendView.as_view(), name="remove-friend"),
-    
-    # Clan system endpoints
-    path("clans/create/", CreateClanView.as_view(), name="create-clan"),
-    path("clans/join/", JoinClanView.as_view(), name="join-clan"),
-    path("clans/leave/", LeaveClanView.as_view(), name="leave-clan"),
-    path("clans/search/", SearchClansView.as_view(), name="search-clans"),
-    path("clans/top/", TopClansView.as_view(), name="top-clans"),
 ]
