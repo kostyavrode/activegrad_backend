@@ -1,12 +1,13 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 from django.utils import timezone
 import logging
-from .models import PlayerLandmarkObservation
-from .serializers import SavePlayerLandmarksSerializer
+from .models import PlayerLandmarkObservation, LandmarkCapture
+from .serializers import SavePlayerLandmarksSerializer, CaptureLandmarkSerializer, LandmarkCaptureSerializer
 from quests.models import Quest, QuestProgress, DailyQuest
 
 User = get_user_model()
@@ -217,3 +218,124 @@ class TestLandmarksView(APIView):
             "user_id": request.user.id,
             "received_data": request.data
         }, status=200)
+
+
+class CaptureLandmarkView(APIView):
+    """
+    Метод 2: Захват достопримечательности.
+    POST /api/landmarks/capture/
+    Body: {"external_id": "12345"}
+    
+    Логика:
+    - Проверяет can_capture_now через метод can_capture()
+    - Если можно - создает новую запись захвата (меняет владельца)
+    - Если нельзя - возвращает ошибку
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CaptureLandmarkSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "success": False,
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        external_id = serializer.validated_data['external_id']
+        user = request.user
+        
+        # Проверяем, можно ли захватить достопримечательность сейчас
+        can_capture_now, latest_capture = LandmarkCapture.can_capture(external_id)
+        
+        if not can_capture_now:
+            # Вычисляем оставшееся время
+            time_remaining = latest_capture.time_until_next_capture_allowed()
+            minutes_remaining = int(time_remaining.total_seconds() / 60)
+            seconds_remaining = int(time_remaining.total_seconds() % 60)
+            
+            return Response({
+                "success": False,
+                "error": "Landmark cannot be captured now",
+                "message": f"Нельзя захватить достопримечательность сейчас. Повторный захват возможен через {minutes_remaining} мин {seconds_remaining} сек",
+                "can_capture_now": False,
+                "current_owner": {
+                    "id": latest_capture.captured_by.id,
+                    "username": latest_capture.captured_by.username
+                },
+                "captured_at": latest_capture.captured_at.isoformat(),
+                "time_until_next_capture_minutes": minutes_remaining,
+                "time_until_next_capture_seconds": seconds_remaining,
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Создаем новый захват (меняем владельца)
+        new_capture = LandmarkCapture.objects.create(
+            external_id=external_id,
+            captured_by=user,
+            clan=user.clan  # Клан игрока (может быть None)
+        )
+        
+        return Response({
+            "success": True,
+            "message": "Landmark captured successfully. Owner changed.",
+            "capture": {
+                "id": new_capture.id,
+                "external_id": new_capture.external_id,
+                "captured_by": {
+                    "id": new_capture.captured_by.id,
+                    "username": new_capture.captured_by.username
+                },
+                "captured_at": new_capture.captured_at.isoformat(),
+                "clan": {
+                    "id": new_capture.clan.id,
+                    "name": new_capture.clan.name
+                } if new_capture.clan else None
+            }
+        }, status=status.HTTP_201_CREATED)
+
+
+class GetLandmarkCaptureView(APIView):
+    """
+    Метод 1: Получение информации о захвате достопримечательности.
+    GET /api/landmarks/<external_id>/capture/
+    
+    Возвращает:
+    - Кто захватил (captured_by)
+    - Когда захватил (captured_at)
+    - Клан (clan)
+    - can_capture_now (булевое значение - можно ли захватить сейчас)
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, external_id):
+        # Получаем последний захват
+        latest_capture = LandmarkCapture.get_latest_capture(external_id)
+        
+        # Проверяем, можно ли захватить сейчас
+        can_capture_now, _ = LandmarkCapture.can_capture(external_id)
+        
+        # Если достопримечательность еще не захватывалась
+        if latest_capture is None:
+            return Response({
+                "success": True,
+                "captured": False,
+                "can_capture_now": True,
+                "captured_by": None,
+                "captured_at": None,
+                "clan": None
+            }, status=status.HTTP_200_OK)
+        
+        # Если захватывалась - возвращаем информацию о текущем владельце
+        return Response({
+            "success": True,
+            "captured": True,
+            "can_capture_now": can_capture_now,
+            "captured_by": {
+                "id": latest_capture.captured_by.id,
+                "username": latest_capture.captured_by.username
+            },
+            "captured_at": latest_capture.captured_at.isoformat(),
+            "clan": {
+                "id": latest_capture.clan.id,
+                "name": latest_capture.clan.name
+            } if latest_capture.clan else None
+        }, status=status.HTTP_200_OK)

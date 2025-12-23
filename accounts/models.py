@@ -20,6 +20,16 @@ class CustomUser(AbstractUser):
     ]
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES, null=True, blank=True)
     
+    # Связь с кланом
+    clan = models.ForeignKey(
+        'Clan',
+        related_name='members',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Клан"
+    )
+    
     EXPERIENCE_PER_LEVEL = 1000  # Константа: опыта нужно для повышения уровня
     
     def add_coins(self, amount):
@@ -180,3 +190,31 @@ class Friendship(models.Model):
             else:
                 friends.append(friendship.user1)
         return friends
+
+
+class Clan(models.Model):
+    """
+    Модель для кланов (групп игроков).
+    """
+    name = models.CharField(max_length=100, unique=True, verbose_name="Название клана")
+    description = models.TextField(blank=True, null=True, verbose_name="Описание")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
+    created_by = models.ForeignKey(
+        CustomUser,
+        related_name='created_clans',
+        on_delete=models.SET_NULL,
+        null=True,
+        verbose_name="Создатель"
+    )
+    
+    class Meta:
+        verbose_name = "Клан"
+        verbose_name_plural = "Кланы"
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return self.name
+    
+    def get_member_count(self):
+        """Возвращает количество участников клана."""
+        return self.members.count()
