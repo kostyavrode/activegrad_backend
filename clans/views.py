@@ -3,8 +3,12 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Count
+from django.db import transaction
+from django.contrib.auth import get_user_model
 from .models import Clan
 from .serializers import ClanSerializer, CreateClanSerializer, JoinClanSerializer
+
+User = get_user_model()
 
 
 class CreateClanView(APIView):
@@ -32,22 +36,35 @@ class CreateClanView(APIView):
                 "error": "You are already in a clan. Leave your current clan first."
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Создаем клан
-        clan = Clan.objects.create(
-            name=serializer.validated_data['name'],
-            description=serializer.validated_data.get('description', ''),
-            created_by=user
-        )
-        
-        # Присоединяем создателя к клану
-        user.clan = clan
-        user.save()
-        
-        return Response({
-            "success": True,
-            "message": "Clan created successfully",
-            "clan": ClanSerializer(clan).data
-        }, status=status.HTTP_201_CREATED)
+        # Используем транзакцию для атомарности операций
+        try:
+            with transaction.atomic():
+                # Создаем клан
+                clan = Clan.objects.create(
+                    name=serializer.validated_data['name'],
+                    description=serializer.validated_data.get('description', ''),
+                    created_by=user
+                )
+                
+                # Обновляем пользователя, присоединяя его к клану
+                # Используем update для обхода возможных проблем с кэшированием
+                User.objects.filter(id=user.id).update(clan=clan)
+                # Обновляем объект user из базы данных
+                user.refresh_from_db()
+                
+            # Перезагружаем клан, чтобы получить актуальные данные
+            clan.refresh_from_db()
+            
+            return Response({
+                "success": True,
+                "message": "Clan created successfully",
+                "clan": ClanSerializer(clan).data
+            }, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({
+                "success": False,
+                "error": f"Failed to create clan: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class JoinClanView(APIView):
@@ -91,8 +108,15 @@ class JoinClanView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
         
         # Присоединяем пользователя к клану
-        user.clan = clan
-        user.save()
+        try:
+            with transaction.atomic():
+                User.objects.filter(id=user.id).update(clan=clan)
+                user.refresh_from_db()
+        except Exception as e:
+            return Response({
+                "success": False,
+                "error": f"Failed to join clan: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         return Response({
             "success": True,
@@ -122,8 +146,15 @@ class LeaveClanView(APIView):
         clan_id = user.clan.id
         
         # Покидаем клан
-        user.clan = None
-        user.save()
+        try:
+            with transaction.atomic():
+                User.objects.filter(id=user.id).update(clan=None)
+                user.refresh_from_db()
+        except Exception as e:
+            return Response({
+                "success": False,
+                "error": f"Failed to leave clan: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         # Проверяем, не остался ли клан пустым (если создатель покинул)
         clan = Clan.objects.get(id=clan_id)
