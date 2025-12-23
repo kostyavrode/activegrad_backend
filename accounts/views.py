@@ -106,9 +106,9 @@ class GetPlayerInfoView(APIView):
                 "error": "player_id must be a valid integer"
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Получаем игрока
+        # Получаем игрока с кланом
         try:
-            player = User.objects.get(id=player_id)
+            player = User.objects.select_related('clan').get(id=player_id)
         except User.DoesNotExist:
             return Response({
                 "success": False,
@@ -127,6 +127,15 @@ class GetPlayerInfoView(APIView):
         # Форматируем дату регистрации
         registration_date = player.registration_date.isoformat() if player.registration_date else None
 
+        # Формируем информацию о клане
+        clan_info = None
+        if player.clan:
+            clan_info = {
+                "id": player.clan.id,
+                "name": player.clan.name,
+                "description": player.clan.description or ""
+            }
+
         return Response({
             "success": True,
             "player": {
@@ -137,6 +146,7 @@ class GetPlayerInfoView(APIView):
                 "last_name": player.last_name or "",
                 "registration_date": registration_date,
                 "gender": player.gender if hasattr(player, 'gender') else None,
+                "clan": clan_info,
                 "landmarks": {
                     "external_ids": external_ids,
                     "total_count": len(external_ids)
