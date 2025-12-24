@@ -129,12 +129,16 @@ class GetPlayerInfoView(APIView):
 
         # Формируем информацию о клане
         clan_info = None
-        if player.clan:
-            clan_info = {
-                "id": player.clan.id,
-                "name": player.clan.name,
-                "description": player.clan.description or ""
-            }
+        try:
+            if hasattr(player, 'clan') and player.clan:
+                clan_info = {
+                    "id": player.clan.id,
+                    "name": player.clan.name,
+                    "description": player.clan.description or ""
+                }
+        except Exception as e:
+            # Если возникла ошибка при получении информации о клане, оставляем None
+            clan_info = None
 
         return Response({
             "success": True,
