@@ -130,28 +130,30 @@ class GetPlayerInfoView(APIView):
         # Формируем информацию о клане - всегда включаем поле, даже если клана нет
         clan_info = None
         try:
-            # Пробуем получить клан через select_related (уже загружен)
-            if player.clan:
-                clan_info = {
-                    "id": player.clan.id,
-                    "name": player.clan.name,
-                    "description": player.clan.description or ""
-                }
-            # Если клан не загружен через select_related, проверяем clan_id
-            elif hasattr(player, 'clan_id') and player.clan_id is not None:
-                # Загружаем клан отдельным запросом
-                from clans.models import Clan
-                try:
-                    clan = Clan.objects.get(id=player.clan_id)
+            # Проверяем наличие клана у игрока
+            if hasattr(player, 'clan_id') and player.clan_id is not None:
+                # Пробуем получить клан через select_related (уже загружен)
+                if hasattr(player, 'clan') and player.clan is not None:
                     clan_info = {
-                        "id": clan.id,
-                        "name": clan.name,
-                        "description": clan.description or ""
+                        "id": player.clan.id,
+                        "name": player.clan.name,
+                        "description": player.clan.description or ""
                     }
-                except Clan.DoesNotExist:
-                    clan_info = None
-        except Exception:
+                else:
+                    # Если клан не загружен через select_related, загружаем его отдельным запросом
+                    from clans.models import Clan
+                    try:
+                        clan = Clan.objects.get(id=player.clan_id)
+                        clan_info = {
+                            "id": clan.id,
+                            "name": clan.name,
+                            "description": clan.description or ""
+                        }
+                    except Clan.DoesNotExist:
+                        clan_info = None
+        except Exception as e:
             # Если возникла ошибка при получении информации о клане, оставляем None
+            # В production можно залогировать ошибку: import logging; logging.error(f"Error getting clan: {e}")
             clan_info = None
 
         # Формируем ответ - всегда включаем поле clan
