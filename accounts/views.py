@@ -127,20 +127,35 @@ class GetPlayerInfoView(APIView):
         # Форматируем дату регистрации
         registration_date = player.registration_date.isoformat() if player.registration_date else None
 
-        # Формируем информацию о клане
+        # Формируем информацию о клане - всегда включаем поле, даже если клана нет
         clan_info = None
         try:
-            if hasattr(player, 'clan') and player.clan:
+            # Пробуем получить клан через select_related (уже загружен)
+            if player.clan:
                 clan_info = {
                     "id": player.clan.id,
                     "name": player.clan.name,
                     "description": player.clan.description or ""
                 }
-        except Exception as e:
+            # Если клан не загружен через select_related, проверяем clan_id
+            elif hasattr(player, 'clan_id') and player.clan_id is not None:
+                # Загружаем клан отдельным запросом
+                from clans.models import Clan
+                try:
+                    clan = Clan.objects.get(id=player.clan_id)
+                    clan_info = {
+                        "id": clan.id,
+                        "name": clan.name,
+                        "description": clan.description or ""
+                    }
+                except Clan.DoesNotExist:
+                    clan_info = None
+        except Exception:
             # Если возникла ошибка при получении информации о клане, оставляем None
             clan_info = None
 
-        return Response({
+        # Формируем ответ - всегда включаем поле clan
+        response_data = {
             "success": True,
             "player": {
                 "id": player.id,
@@ -156,7 +171,9 @@ class GetPlayerInfoView(APIView):
                     "total_count": len(external_ids)
                 }
             }
-        }, status=status.HTTP_200_OK)
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class GetPlayerLandmarksView(APIView):
