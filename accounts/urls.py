@@ -2,6 +2,7 @@ from django.urls import path
 from .views import (
     RegisterAPIView, LoginAPIView, CustomLoginView, UpdateClothesAPIView, 
     GetPlayerInfoView, GetPlayerLandmarksView, GetCurrentUserStatsView, GetCurrentUserCoinsView,
+    UpgradeStatView,
     SendFriendRequestView, AcceptFriendRequestView, RejectFriendRequestView,
     GetFriendsListView, GetPendingFriendRequestsView, GetSentFriendRequestsView, RemoveFriendView
 )
@@ -14,6 +15,7 @@ urlpatterns = [
     path("player/<int:player_id>/", GetPlayerInfoView.as_view(), name="get-player-info"),
     path("player/<int:player_id>/landmarks/", GetPlayerLandmarksView.as_view(), name="get-player-landmarks"),
     path("player/stats/", GetCurrentUserStatsView.as_view(), name="get-current-user-stats"),
+    path("player/upgrade-stat/", UpgradeStatView.as_view(), name="upgrade-stat"),
     path("player/coins/", GetCurrentUserCoinsView.as_view(), name="get-current-user-coins"),
     
     # Friend system endpoints

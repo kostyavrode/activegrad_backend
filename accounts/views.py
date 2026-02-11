@@ -12,7 +12,7 @@ CustomUser = User  # Для совместимости
 from .serializers import (
     UserRegistrationSerializer, UserLoginSerializer, UserClothesSerializer, 
     CustomTokenObtainPairSerializer, FriendRequestSerializer, SendFriendRequestSerializer,
-    FriendshipSerializer, UserBasicSerializer
+    FriendshipSerializer, UserBasicSerializer, UpgradeStatSerializer
 )
 from .models import FriendRequest, Friendship
 
@@ -67,6 +67,10 @@ class LoginAPIView(APIView):
                     "experience": user.experience,
                     "level": user.level,
                     "experience_to_next_level": user.get_experience_to_next_level(),
+                    "strength": user.strength,
+                    "intelligence": user.intelligence,
+                    "agility": user.agility,
+                    "stat_upgrade_points": user.stat_upgrade_points,
                 }
             }, status=status.HTTP_200_OK)
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -156,7 +160,7 @@ class GetPlayerInfoView(APIView):
             # В production можно залогировать ошибку: import logging; logging.error(f"Error getting clan: {e}")
             clan_info = None
 
-        # Формируем ответ - всегда включаем поле clan
+        # Формируем ответ - всегда включаем поле clan и показатели прокачки
         response_data = {
             "success": True,
             "player": {
@@ -167,6 +171,10 @@ class GetPlayerInfoView(APIView):
                 "last_name": player.last_name or "",
                 "registration_date": registration_date,
                 "gender": player.gender if hasattr(player, 'gender') else None,
+                "level": player.level,
+                "strength": getattr(player, 'strength', 1),
+                "intelligence": getattr(player, 'intelligence', 1),
+                "agility": getattr(player, 'agility', 1),
                 "clan": clan_info,
                 "landmarks": {
                     "external_ids": external_ids,
@@ -248,7 +256,59 @@ class GetCurrentUserStatsView(APIView):
                 "progress_to_next_level_percent": round(
                     (user.experience / user.EXPERIENCE_PER_LEVEL) * 100, 
                     2
-                ) if user.EXPERIENCE_PER_LEVEL > 0 else 0
+                ) if user.EXPERIENCE_PER_LEVEL > 0 else 0,
+                "strength": user.strength,
+                "intelligence": user.intelligence,
+                "agility": user.agility,
+                "stat_upgrade_points": user.stat_upgrade_points,
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class UpgradeStatView(APIView):
+    """
+    API endpoint для прокачки показателей (сила, интеллект, ловкость).
+    POST /api/player/upgrade-stat/
+    Body: {"stat_type": "strength" | "intelligence" | "agility"}
+    
+    Требуется stat_upgrade_points > 0 (очки даются при повышении уровня).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = UpgradeStatSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "success": False,
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        user = request.user
+        stat_type = serializer.validated_data['stat_type']
+        
+        if user.stat_upgrade_points <= 0:
+            return Response({
+                "success": False,
+                "error": "No stat upgrade points available. Level up to gain more."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Прокачиваем показатель
+        stat_value = getattr(user, stat_type)
+        setattr(user, stat_type, stat_value + 1)
+        user.stat_upgrade_points -= 1
+        user.save(update_fields=[stat_type, 'stat_upgrade_points'])
+        
+        return Response({
+            "success": True,
+            "message": f"{stat_type.capitalize()} upgraded to {stat_value + 1}",
+            "stat_upgraded": stat_type,
+            "new_value": stat_value + 1,
+            "stat_upgrade_points_remaining": user.stat_upgrade_points,
+            "player_stats": {
+                "strength": user.strength,
+                "intelligence": user.intelligence,
+                "agility": user.agility,
+                "stat_upgrade_points": user.stat_upgrade_points
             }
         }, status=status.HTTP_200_OK)
 

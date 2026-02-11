@@ -57,6 +57,10 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             "experience": self.user.experience,
             "level": self.user.level,
             "experience_to_next_level": self.user.get_experience_to_next_level(),
+            "strength": self.user.strength,
+            "intelligence": self.user.intelligence,
+            "agility": self.user.agility,
+            "stat_upgrade_points": self.user.stat_upgrade_points,
             "registration_date": self.user.registration_date,
             "boots": self.user.boots,
             "pants": self.user.pants,
@@ -89,11 +93,21 @@ class UserClothesSerializer(serializers.ModelSerializer):
         fields = ["boots", "pants", "tshirt", "cap", "gender"]
 
 
+class UpgradeStatSerializer(serializers.Serializer):
+    """Сериализатор для прокачки показателей (сила, интеллект, ловкость)."""
+    STAT_CHOICES = [
+        ('strength', 'Strength'),
+        ('intelligence', 'Intelligence'),
+        ('agility', 'Agility'),
+    ]
+    stat_type = serializers.ChoiceField(choices=STAT_CHOICES, required=True)
+
+
 class UserBasicSerializer(serializers.ModelSerializer):
     """Базовый сериализатор для отображения информации о пользователе в списках друзей."""
     class Meta:
         model = CustomUser
-        fields = ["id", "username", "first_name", "last_name", "level", "gender"]
+        fields = ["id", "username", "first_name", "last_name", "level", "gender", "strength", "intelligence", "agility"]
 
 
 class FriendRequestSerializer(serializers.ModelSerializer):

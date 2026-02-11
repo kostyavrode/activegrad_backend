@@ -29,6 +29,12 @@ class CustomUser(AbstractUser):
         blank=True,
         verbose_name="Клан"
     )
+
+    # Показатели прокачки (по умолчанию 1)
+    strength = models.IntegerField(default=1, help_text="Сила")
+    intelligence = models.IntegerField(default=1, help_text="Интеллект")
+    agility = models.IntegerField(default=1, help_text="Ловкость")
+    stat_upgrade_points = models.IntegerField(default=0, help_text="Очки для прокачки показателей (дают при повышении уровня)")
     
     EXPERIENCE_PER_LEVEL = 1000  # Константа: опыта нужно для повышения уровня
     
@@ -72,11 +78,15 @@ class CustomUser(AbstractUser):
         while self.experience >= self.EXPERIENCE_PER_LEVEL:
             self.experience -= self.EXPERIENCE_PER_LEVEL
             self.level += 1
+            self.stat_upgrade_points += 1  # За каждый уровень — очко для прокачки
             leveled_up = True
             levels_gained += 1
         
         # Сохраняем изменения
-        self.save(update_fields=['experience', 'level'])
+        update_fields = ['experience', 'level']
+        if levels_gained > 0:
+            update_fields.append('stat_upgrade_points')
+        self.save(update_fields=update_fields)
         
         return {
             'experience': self.experience,

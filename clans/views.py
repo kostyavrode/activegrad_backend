@@ -145,23 +145,29 @@ class LeaveClanView(APIView):
         clan_name = user.clan.name
         clan_id = user.clan.id
         
-        # Покидаем клан
+        # Покидаем клан и проверяем, нужно ли удалить пустой клан
         try:
             with transaction.atomic():
+                # Удаляем пользователя из клана
                 User.objects.filter(id=user.id).update(clan=None)
                 user.refresh_from_db()
+                
+                # Проверяем, остались ли еще участники в клане
+                clan = Clan.objects.get(id=clan_id)
+                member_count = clan.members.count()
+                
+                # Если в клане не осталось участников, удаляем клан
+                if member_count == 0:
+                    clan.delete()
+                    return Response({
+                        "success": True,
+                        "message": f"You have left the clan '{clan_name}'. The clan has been deleted as it had no members left."
+                    }, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({
                 "success": False,
                 "error": f"Failed to leave clan: {str(e)}"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        # Проверяем, не остался ли клан пустым (если создатель покинул)
-        clan = Clan.objects.get(id=clan_id)
-        if clan.members.count() == 0:
-            # Если клан пуст, удаляем его (или можно оставить, решать вам)
-            # Пока оставим клан, но он будет пустым
-            pass
         
         return Response({
             "success": True,

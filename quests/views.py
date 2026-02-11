@@ -171,7 +171,8 @@ class CompleteQuestView(APIView):
             if exp_result['leveled_up']:
                 level_info = {
                     'new_level': exp_result['level'],
-                    'levels_gained': exp_result['levels_gained']
+                    'levels_gained': exp_result['levels_gained'],
+                    'stat_upgrade_points_gained': exp_result['levels_gained']
                 }
         elif quest.reward_type == 'item':
             # TODO: Логика выдачи предмета по item_id
@@ -213,7 +214,11 @@ class CompleteQuestView(APIView):
             "coins": user.coins,
             "experience": user.experience,
             "level": user.level,
-            "experience_to_next_level": user.get_experience_to_next_level()
+            "experience_to_next_level": user.get_experience_to_next_level(),
+            "strength": user.strength,
+            "intelligence": user.intelligence,
+            "agility": user.agility,
+            "stat_upgrade_points": user.stat_upgrade_points
         }
         
         # Формируем сообщение с учетом повышения уровня

@@ -4,7 +4,7 @@ from .models import CustomUser, FriendRequest, Friendship
 
 @admin.register(CustomUser)
 class CustomUserAdmin(admin.ModelAdmin):
-    list_display = ('id', 'username', 'email', 'level', 'coins', 'experience', 'clan', 'registration_date')
+    list_display = ('id', 'username', 'email', 'level', 'coins', 'experience', 'strength', 'intelligence', 'agility', 'stat_upgrade_points', 'clan', 'registration_date')
     list_filter = ('level', 'gender', 'registration_date', 'clan')
     search_fields = ('username', 'email', 'first_name', 'last_name', 'clan__name')
 
