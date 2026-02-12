@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('accounts', '0007_delete_clan'),
+        ('accounts', '0002_customuser_gender'),
     ]
 
     operations = [

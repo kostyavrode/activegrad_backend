@@ -26,4 +26,5 @@ urlpatterns = [
     path('api/landmarks/', include('landmarks.urls')),
     path('api/shop/', include('shop.urls')),
     path('api/clans/', include('clans.urls')),
+    path('api/inventory/', include('inventory.urls')),
 ]

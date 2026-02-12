@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     'landmarks',
     'shop',
     'clans',
+    'inventory',
 ]
 
 MIDDLEWARE = [
