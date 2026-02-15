@@ -1,16 +1,22 @@
+import random
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 import logging
 from .models import PlayerLandmarkObservation, LandmarkCapture
 from .serializers import SavePlayerLandmarksSerializer, CaptureLandmarkSerializer, LandmarkCaptureSerializer
 from quests.models import Quest, QuestProgress, DailyQuest
+from inventory.views import get_or_create_inventory
 
 User = get_user_model()
+
+# Награда за каждую новую отметку на достопримечательности: случайное кол-во от 0 до 10
+LANDMARK_REWARD_MIN = 0
+LANDMARK_REWARD_MAX = 10
 logger = logging.getLogger(__name__)
 
 
@@ -22,6 +28,7 @@ class SavePlayerLandmarksView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request):
         try:
             serializer = SavePlayerLandmarksSerializer(data=request.data)
@@ -133,13 +140,53 @@ class SavePlayerLandmarksView(APIView):
                         exc_info=True
                     )
 
-            return Response({
+            # Выдаём ресурсы за каждую новую отметку (metal, wood, blueprints: 0–10 каждое)
+            resources_gained = None
+            if newly_created_count > 0:
+                try:
+                    total_metal = sum(
+                        random.randint(LANDMARK_REWARD_MIN, LANDMARK_REWARD_MAX)
+                        for _ in range(newly_created_count)
+                    )
+                    total_wood = sum(
+                        random.randint(LANDMARK_REWARD_MIN, LANDMARK_REWARD_MAX)
+                        for _ in range(newly_created_count)
+                    )
+                    total_blueprints = sum(
+                        random.randint(LANDMARK_REWARD_MIN, LANDMARK_REWARD_MAX)
+                        for _ in range(newly_created_count)
+                    )
+                    inventory = get_or_create_inventory(player)
+                    inventory.metal += total_metal
+                    inventory.wood += total_wood
+                    inventory.blueprints += total_blueprints
+                    inventory.save()
+                    resources_gained = {
+                        "metal": total_metal,
+                        "wood": total_wood,
+                        "blueprints": total_blueprints,
+                    }
+                    logger.info(
+                        f"Player {player_id} received resources for {newly_created_count} landmark(s): "
+                        f"metal={total_metal}, wood={total_wood}, blueprints={total_blueprints}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Error granting resources for player {player_id}: {str(e)}",
+                        exc_info=True
+                    )
+
+            response_data = {
                 "success": True,
                 "message": f"Successfully saved {len(saved_external_ids)} landmark observation(s)",
                 "player_id": player_id,
                 "saved_external_ids": saved_external_ids,
                 "total_saved": len(saved_external_ids)
-            }, status=200)
+            }
+            if resources_gained:
+                response_data["resources_gained"] = resources_gained
+
+            return Response(response_data, status=200)
             
         except Exception as e:
             logger.error(f"Unexpected error in SavePlayerLandmarksView: {str(e)}", exc_info=True)
