@@ -9,6 +9,28 @@ from .models import PlayerInventory, CraftRecipe, UpgradeConfig
 from .serializers import UpgradeRequestSerializer
 
 
+# Маппинг для универсального API (массивы + display_name)
+RESOURCE_IDS = ['metal', 'wood', 'blueprints']
+RESOURCE_DISPLAY_NAMES = {
+    'metal': 'Металл',
+    'wood': 'Дерево',
+    'blueprints': 'Чертежи',
+}
+ITEM_DISPLAY_NAMES = {
+    'sword': 'Меч',
+    'shield': 'Щит',
+}
+ITEM_STAT_KEYS = {
+    'sword': 'sharpness',
+    'shield': 'durability',
+}
+RESOURCE_FIELDS = {
+    'metal': 'metal',
+    'wood': 'wood',
+    'blueprints': 'blueprints',
+}
+
+
 def get_or_create_inventory(user):
     """Получает или создаёт инвентарь для пользователя."""
     inventory, created = PlayerInventory.objects.get_or_create(
@@ -18,76 +40,113 @@ def get_or_create_inventory(user):
     return inventory
 
 
+def format_inventory_response(inventory):
+    """Форматирует инвентарь в универсальный формат (массивы + display_name)."""
+    resources = [
+        {
+            'id': rid,
+            'amount': getattr(inventory, field),
+            'display_name': RESOURCE_DISPLAY_NAMES[rid],
+        }
+        for rid, field in RESOURCE_FIELDS.items()
+    ]
+    items = []
+    for item_id in ITEM_DISPLAY_NAMES:
+        has_item = (item_id == 'sword' and inventory.has_sword()) or (item_id == 'shield' and inventory.has_shield())
+        stat_key = ITEM_STAT_KEYS[item_id]
+        stat_val = getattr(inventory, f'sword_sharpness' if item_id == 'sword' else 'shield_durability')
+        item_data = {
+            'id': item_id,
+            'display_name': ITEM_DISPLAY_NAMES[item_id],
+            'has_item': has_item,
+        }
+        item_data[stat_key] = stat_val if has_item else None
+        items.append(item_data)
+    return {'resources': resources, 'items': items}
+
+
 class InventoryView(APIView):
     """
     GET /api/inventory/
-    Возвращает инвентарь текущего игрока: ресурсы и предметы.
+    Возвращает инвентарь в универсальном формате: массивы ресурсов и предметов.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         inventory = get_or_create_inventory(request.user)
-        data = {
-            'resources': {
-                'metal': inventory.metal,
-                'wood': inventory.wood,
-                'blueprints': inventory.blueprints,
-            },
-            'items': {
-                'sword': {
-                    'has_item': inventory.has_sword(),
-                    'sharpness': inventory.sword_sharpness if inventory.has_sword() else None,
-                },
-                'shield': {
-                    'has_item': inventory.has_shield(),
-                    'durability': inventory.shield_durability if inventory.has_shield() else None,
-                },
-            },
-        }
-        return Response({'success': True, 'inventory': data}, status=status.HTTP_200_OK)
+        data = format_inventory_response(inventory)
+        return Response({'success': True, **data}, status=status.HTTP_200_OK)
 
 
 class RecipesView(APIView):
     """
     GET /api/inventory/recipes/
-    Возвращает актуальные рецепты крафта.
+    Возвращает рецепты в универсальном формате: массив с requirements.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         recipes = CraftRecipe.objects.filter(is_active=True)
-        data = {}
+        data = []
         for r in recipes:
-            data[r.item_type] = {
-                'metal_required': r.metal_required,
-                'wood_required': r.wood_required,
-                'blueprints_required': r.blueprints_required,
-            }
+            requirements = []
+            for rid, field in RESOURCE_FIELDS.items():
+                amount = getattr(r, f'{rid}_required')
+                if amount > 0:
+                    requirements.append({
+                        'resource_id': rid,
+                        'amount': amount,
+                        'display_name': RESOURCE_DISPLAY_NAMES[rid],
+                    })
+            data.append({
+                'id': r.item_type,
+                'display_name': ITEM_DISPLAY_NAMES.get(r.item_type, r.get_item_type_display()),
+                'requirements': requirements,
+            })
         return Response({'success': True, 'recipes': data}, status=status.HTTP_200_OK)
 
 
-class CraftSwordView(APIView):
+class CraftItemView(APIView):
     """
-    POST /api/inventory/craft/sword/
-    Крафт меча по рецепту.
+    POST /api/inventory/craft/{item_id}/
+    Универсальный крафт предмета по его ID (sword, shield и т.д.).
     """
     permission_classes = [IsAuthenticated]
 
+    def _has_item(self, inventory, item_id):
+        if item_id == 'sword':
+            return inventory.has_sword()
+        if item_id == 'shield':
+            return inventory.has_shield()
+        return False
+
+    def _set_crafted_item(self, inventory, item_id):
+        if item_id == 'sword':
+            inventory.sword_sharpness = 1
+        elif item_id == 'shield':
+            inventory.shield_durability = 1
+
     @transaction.atomic
-    def post(self, request):
-        recipe = CraftRecipe.objects.filter(item_type='sword', is_active=True).first()
+    def post(self, request, item_id):
+        if item_id not in ITEM_DISPLAY_NAMES:
+            return Response({
+                'success': False,
+                'error': f'Unknown item_id: {item_id}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        recipe = CraftRecipe.objects.filter(item_type=item_id, is_active=True).first()
         if not recipe:
             return Response({
                 'success': False,
-                'error': 'Recipe for sword not found'
+                'error': f'Recipe for {item_id} not found'
             }, status=status.HTTP_404_NOT_FOUND)
 
         inventory = get_or_create_inventory(request.user)
 
-        if inventory.has_sword():
+        if self._has_item(inventory, item_id):
             return Response({
                 'success': False,
-                'error': 'You already have a sword'
+                'error': f'You already have a {item_id}'
             }, status=status.HTTP_400_BAD_REQUEST)
 
         if (inventory.metal < recipe.metal_required or
@@ -107,70 +166,14 @@ class CraftSwordView(APIView):
         inventory.metal -= recipe.metal_required
         inventory.wood -= recipe.wood_required
         inventory.blueprints -= recipe.blueprints_required
-        inventory.sword_sharpness = 1
+        self._set_crafted_item(inventory, item_id)
         inventory.save()
 
+        display_name = ITEM_DISPLAY_NAMES[item_id]
         return Response({
             'success': True,
-            'message': 'Sword crafted successfully',
-            'inventory': {
-                'resources': {'metal': inventory.metal, 'wood': inventory.wood, 'blueprints': inventory.blueprints},
-                'sword': {'sharpness': 1},
-            },
-        }, status=status.HTTP_200_OK)
-
-
-class CraftShieldView(APIView):
-    """
-    POST /api/inventory/craft/shield/
-    Крафт щита по рецепту.
-    """
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def post(self, request):
-        recipe = CraftRecipe.objects.filter(item_type='shield', is_active=True).first()
-        if not recipe:
-            return Response({
-                'success': False,
-                'error': 'Recipe for shield not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-
-        inventory = get_or_create_inventory(request.user)
-
-        if inventory.has_shield():
-            return Response({
-                'success': False,
-                'error': 'You already have a shield'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        if (inventory.metal < recipe.metal_required or
-                inventory.wood < recipe.wood_required or
-                inventory.blueprints < recipe.blueprints_required):
-            return Response({
-                'success': False,
-                'error': 'Insufficient resources',
-                'required': recipe.get_requirements(),
-                'current': {
-                    'metal': inventory.metal,
-                    'wood': inventory.wood,
-                    'blueprints': inventory.blueprints,
-                },
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        inventory.metal -= recipe.metal_required
-        inventory.wood -= recipe.wood_required
-        inventory.blueprints -= recipe.blueprints_required
-        inventory.shield_durability = 1
-        inventory.save()
-
-        return Response({
-            'success': True,
-            'message': 'Shield crafted successfully',
-            'inventory': {
-                'resources': {'metal': inventory.metal, 'wood': inventory.wood, 'blueprints': inventory.blueprints},
-                'shield': {'durability': 1},
-            },
+            'message': f'{display_name} crafted successfully',
+            'inventory': format_inventory_response(inventory),
         }, status=status.HTTP_200_OK)
 
 
