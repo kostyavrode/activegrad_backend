@@ -6,13 +6,36 @@ from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+from datetime import timedelta
 import logging
-from .models import PlayerLandmarkObservation, LandmarkCapture
+from .models import PlayerLandmarkObservation, LandmarkCapture, LandmarkCaptureCooldown
 from .serializers import SavePlayerLandmarksSerializer, CaptureLandmarkSerializer, LandmarkCaptureSerializer
 from quests.models import Quest, QuestProgress, DailyQuest
 from inventory.views import get_or_create_inventory
 
 User = get_user_model()
+
+
+def calculate_capture_probability(attacker_sword_level: int, defender_shield_level: int) -> float:
+    """
+    Вероятность успешного захвата в зависимости от уровня меча атакующего и щита защитника.
+    diff = attacker_sword - defender_shield
+    diff >= 2: 100%
+    diff == 1: 80%
+    diff == 0: 50%
+    diff == -1: 25%
+    diff <= -2: 5%
+    """
+    diff = attacker_sword_level - defender_shield_level
+    if diff >= 2:
+        return 100.0
+    if diff == 1:
+        return 80.0
+    if diff == 0:
+        return 50.0
+    if diff == -1:
+        return 25.0
+    return 5.0  # diff <= -2
 
 # Награда за каждую новую отметку на достопримечательности: случайное кол-во от 0 до 10
 LANDMARK_REWARD_MIN = 0
@@ -291,34 +314,86 @@ class CaptureLandmarkView(APIView):
         external_id = serializer.validated_data['external_id']
         user = request.user
         
-        # Проверяем, можно ли захватить достопримечательность сейчас
-        can_capture_now, latest_capture = LandmarkCapture.can_capture(external_id)
-        
+        # Проверяем, можно ли захватить (30 мин неприступности или 5 мин после неудачи)
+        can_capture_now, latest_capture, fail_cooldown = LandmarkCapture.can_capture(external_id)
+
         if not can_capture_now:
-            # Вычисляем оставшееся время
-            time_remaining = latest_capture.time_until_next_capture_allowed()
-            minutes_remaining = int(time_remaining.total_seconds() / 60)
-            seconds_remaining = int(time_remaining.total_seconds() % 60)
-            
+            if fail_cooldown:
+                # Блокировка из-за неудачной попытки (5 мин)
+                time_remaining = fail_cooldown.time_remaining()
+                minutes_remaining = int(time_remaining.total_seconds() / 60)
+                seconds_remaining = int(time_remaining.total_seconds() % 60)
+                return Response({
+                    "success": False,
+                    "error": "Landmark cannot be captured now",
+                    "message": f"Последняя попытка захвата не удалась. Повторная попытка возможна через {minutes_remaining} мин {seconds_remaining} сек",
+                    "can_capture_now": False,
+                    "block_reason": "failed_capture_cooldown",
+                    "time_until_next_capture_minutes": minutes_remaining,
+                    "time_until_next_capture_seconds": seconds_remaining,
+                    "current_owner": {
+                        "id": latest_capture.captured_by.id,
+                        "username": latest_capture.captured_by.username
+                    } if latest_capture else None,
+                    "captured_at": latest_capture.captured_at.isoformat() if latest_capture else None,
+                }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                # Блокировка из-за 30-минутной неприступности
+                time_remaining = latest_capture.time_until_next_capture_allowed()
+                minutes_remaining = int(time_remaining.total_seconds() / 60)
+                seconds_remaining = int(time_remaining.total_seconds() % 60)
+                return Response({
+                    "success": False,
+                    "error": "Landmark cannot be captured now",
+                    "message": f"Достопримечательность под защитой. Попытка перехвата возможна через {minutes_remaining} мин {seconds_remaining} сек",
+                    "can_capture_now": False,
+                    "block_reason": "invulnerability",
+                    "current_owner": {
+                        "id": latest_capture.captured_by.id,
+                        "username": latest_capture.captured_by.username
+                    },
+                    "captured_at": latest_capture.captured_at.isoformat(),
+                    "time_until_next_capture_minutes": minutes_remaining,
+                    "time_until_next_capture_seconds": seconds_remaining,
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Прошло 30 минут — считаем вероятность по мечу атакующего и щиту защитника
+        defender = latest_capture.captured_by
+        attacker_inv = get_or_create_inventory(user)
+        defender_inv = get_or_create_inventory(defender)
+        attacker_sword = attacker_inv.sword_sharpness if attacker_inv.sword_sharpness is not None else 0
+        defender_shield = defender_inv.shield_durability if defender_inv.shield_durability is not None else 0
+        
+        probability = calculate_capture_probability(attacker_sword, defender_shield)
+        roll = random.uniform(0, 100)
+        capture_succeeded = roll < probability
+        
+        if not capture_succeeded:
+            # Кулдаун 5 минут — нельзя пытаться снова
+            cooldown_until = timezone.now() + timedelta(minutes=LandmarkCapture.FAILED_CAPTURE_COOLDOWN_MINUTES)
+            LandmarkCaptureCooldown.objects.update_or_create(
+                external_id=external_id,
+                defaults={"cooldown_until": cooldown_until}
+            )
+            time_remaining = cooldown_until - timezone.now()
             return Response({
                 "success": False,
-                "error": "Landmark cannot be captured now",
-                "message": f"Нельзя захватить достопримечательность сейчас. Повторный захват возможен через {minutes_remaining} мин {seconds_remaining} сек",
-                "can_capture_now": False,
-                "current_owner": {
-                    "id": latest_capture.captured_by.id,
-                    "username": latest_capture.captured_by.username
-                },
-                "captured_at": latest_capture.captured_at.isoformat(),
-                "time_until_next_capture_minutes": minutes_remaining,
-                "time_until_next_capture_seconds": seconds_remaining,
+                "error": "Capture failed",
+                "message": "Захват не удался. Повторная попытка возможна через 5 минут.",
+                "capture_failed": True,
+                "probability": round(probability, 2),
+                "roll": round(roll, 2),
+                "attacker_sword_level": attacker_sword,
+                "defender_shield_level": defender_shield,
+                "retry_available_in_minutes": 5,
+                "retry_available_in_seconds": int(time_remaining.total_seconds()),
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Создаем новый захват (меняем владельца)
+        # Захват успешен — создаём новую запись
         new_capture = LandmarkCapture.objects.create(
             external_id=external_id,
             captured_by=user,
-            clan=user.clan  # Клан игрока (может быть None)
+            clan=user.clan
         )
         
         return Response({
@@ -357,22 +432,26 @@ class GetLandmarkCaptureView(APIView):
         # Получаем последний захват
         latest_capture = LandmarkCapture.get_latest_capture(external_id)
         
-        # Проверяем, можно ли захватить сейчас
-        can_capture_now, _ = LandmarkCapture.can_capture(external_id)
-        
+        # Проверяем, можно ли захватить (30 мин или 5 мин после неудачи)
+        can_capture_now, _, fail_cooldown = LandmarkCapture.can_capture(external_id)
+
         # Если достопримечательность еще не захватывалась
         if latest_capture is None:
             return Response({
                 "success": True,
                 "captured": False,
-                "can_capture_now": True,
+                "can_capture_now": not fail_cooldown,
                 "captured_by": None,
                 "captured_at": None,
-                "clan": None
+                "clan": None,
+                "defender_shield_level": None
             }, status=status.HTTP_200_OK)
-        
-        # Если захватывалась - возвращаем информацию о текущем владельце
-        return Response({
+
+        # Уровень щита текущего владельца (для отображения в UI)
+        defender_inv = get_or_create_inventory(latest_capture.captured_by)
+        defender_shield = defender_inv.shield_durability if defender_inv.shield_durability is not None else 0
+
+        response_data = {
             "success": True,
             "captured": True,
             "can_capture_now": can_capture_now,
@@ -384,5 +463,15 @@ class GetLandmarkCaptureView(APIView):
             "clan": {
                 "id": latest_capture.clan.id,
                 "name": latest_capture.clan.name
-            } if latest_capture.clan else None
-        }, status=status.HTTP_200_OK)
+            } if latest_capture.clan else None,
+            "defender_shield_level": defender_shield,
+        }
+        if not can_capture_now:
+            if fail_cooldown:
+                time_remaining = fail_cooldown.time_remaining()
+            else:
+                time_remaining = latest_capture.time_until_next_capture_allowed()
+            response_data["time_until_next_capture_minutes"] = int(time_remaining.total_seconds() / 60)
+            response_data["time_until_next_capture_seconds"] = int(time_remaining.total_seconds() % 60)
+            response_data["block_reason"] = "failed_capture_cooldown" if fail_cooldown else "invulnerability"
+        return Response(response_data, status=status.HTTP_200_OK)

@@ -74,27 +74,67 @@ class LandmarkCapture(models.Model):
         except LandmarkCapture.DoesNotExist:
             return None
     
+    # Время неприступности после захвата (никто не может перехватить)
+    INVULNERABILITY_MINUTES = 30
+
+    FAILED_CAPTURE_COOLDOWN_MINUTES = 5  # Кулдаун после неудачной попытки
+
     @staticmethod
     def can_capture(external_id):
         """
         Проверяет, можно ли захватить достопримечательность.
-        Возвращает (можно_ли_захватить, последний_захват или None).
+        Возвращает (можно_ли_захватить, последний_захват или None, fail_cooldown или None).
+        Блокировки: 30 мин после захвата, 5 мин после неудачной попытки.
         """
         latest_capture = LandmarkCapture.get_latest_capture(external_id)
-        
+        now = timezone.now()
+
         # Если достопримечательность еще никто не захватывал
         if latest_capture is None:
-            return True, None
-        
-        # Проверяем, прошло ли больше часа с последнего захвата
-        time_since_capture = timezone.now() - latest_capture.captured_at
-        can_capture = time_since_capture >= timedelta(hours=1)
-        
-        return can_capture, latest_capture
+            # Проверяем кулдаун после неудачи (если кто-то пытался захватить пустую и провалился — маловероятно, но на всякий случай)
+            fail_cooldown = LandmarkCaptureCooldown.objects.filter(
+                external_id=external_id, cooldown_until__gt=now
+            ).first()
+            if fail_cooldown:
+                return False, None, fail_cooldown
+            return True, None, None
+
+        # Проверяем, прошло ли 30 минут с последнего захвата
+        time_since_capture = now - latest_capture.captured_at
+        invulnerability = timedelta(minutes=LandmarkCapture.INVULNERABILITY_MINUTES)
+        if time_since_capture < invulnerability:
+            return False, latest_capture, None
+
+        # Проверяем кулдаун 5 минут после неудачной попытки
+        fail_cooldown = LandmarkCaptureCooldown.objects.filter(
+            external_id=external_id, cooldown_until__gt=now
+        ).first()
+        if fail_cooldown:
+            return False, latest_capture, fail_cooldown
+
+        return True, latest_capture, None
     
     def time_until_next_capture_allowed(self):
-        """Возвращает время, через которое можно будет захватить снова (timedelta)."""
+        """Возвращает время, через которое можно будет попытаться перехватить (timedelta)."""
         time_since_capture = timezone.now() - self.captured_at
-        time_required = timedelta(hours=1)
+        time_required = timedelta(minutes=LandmarkCapture.INVULNERABILITY_MINUTES)
         remaining = time_required - time_since_capture
+        return remaining if remaining.total_seconds() > 0 else timedelta(0)
+
+
+class LandmarkCaptureCooldown(models.Model):
+    """
+    Кулдаун 5 минут после неудачной попытки захвата.
+    В течение этого времени повторный захват невозможен.
+    """
+    external_id = models.CharField(max_length=200, db_index=True, unique=True)
+    cooldown_until = models.DateTimeField(verbose_name="До какого времени нельзя захватывать")
+
+    class Meta:
+        verbose_name = "Кулдаун захвата (после неудачи)"
+        verbose_name_plural = "Кулдауны захватов"
+
+    def time_remaining(self):
+        """Время до окончания кулдауна."""
+        remaining = self.cooldown_until - timezone.now()
         return remaining if remaining.total_seconds() > 0 else timedelta(0)

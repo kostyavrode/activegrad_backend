@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import PlayerLandmarkObservation, LandmarkCapture
+from .models import PlayerLandmarkObservation, LandmarkCapture, LandmarkCaptureCooldown
 
 
 @admin.register(PlayerLandmarkObservation)
@@ -18,3 +18,9 @@ class LandmarkCaptureAdmin(admin.ModelAdmin):
     search_fields = ("external_id", "captured_by__username", "clan__name")
     readonly_fields = ("captured_at",)
     list_per_page = 50
+
+
+@admin.register(LandmarkCaptureCooldown)
+class LandmarkCaptureCooldownAdmin(admin.ModelAdmin):
+    list_display = ("external_id", "cooldown_until")
+    search_fields = ("external_id",)
