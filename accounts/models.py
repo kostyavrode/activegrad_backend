@@ -35,6 +35,7 @@ class CustomUser(AbstractUser):
     intelligence = models.IntegerField(default=1, help_text="Интеллект")
     agility = models.IntegerField(default=1, help_text="Ловкость")
     stat_upgrade_points = models.IntegerField(default=0, help_text="Очки для прокачки показателей (дают при повышении уровня)")
+    daily_steps = models.IntegerField(default=0, help_text="Шаги за сегодня (для квеста steps, обновляется через POST /api/player/daily-steps/)")
     
     EXPERIENCE_PER_LEVEL = 1000  # Константа: опыта нужно для повышения уровня
     

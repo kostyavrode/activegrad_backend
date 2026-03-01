@@ -103,6 +103,11 @@ class UpgradeStatSerializer(serializers.Serializer):
     stat_type = serializers.ChoiceField(choices=STAT_CHOICES, required=True)
 
 
+class UpdateDailyStepsSerializer(serializers.Serializer):
+    """Сериализатор для обновления шагов за день (квест steps)."""
+    daily_steps = serializers.IntegerField(required=True, min_value=0)
+
+
 class UserBasicSerializer(serializers.ModelSerializer):
     """Базовый сериализатор для отображения информации о пользователе в списках друзей."""
     class Meta:

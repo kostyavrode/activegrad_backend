@@ -53,6 +53,7 @@ class QuestSerializer(serializers.ModelSerializer):
 class QuestCompleteSerializer(serializers.Serializer):
     """Сериализатор для завершения квеста"""
     player_id = serializers.IntegerField(required=True, help_text="ID игрока")
+    steps = serializers.IntegerField(required=False, min_value=0, allow_null=True, help_text="Шаги за день (для квеста типа steps)")
 
 
 class QuestProgressSerializer(serializers.ModelSerializer):

@@ -148,11 +148,23 @@ class CompleteQuestView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # Проверяем выполнение
-        if quest_progress.current_progress < quest.count:
-            return Response({
-                "success": False,
-                "message": f"Quest not completed. Progress: {quest_progress.current_progress}/{quest.count}"
-            }, status=status.HTTP_400_BAD_REQUEST)
+        if quest.type == 'steps':
+            # Для квеста «шаги»: используем steps из запроса или daily_steps из профиля
+            steps_value = serializer.validated_data.get('steps')
+            effective_steps = steps_value if steps_value is not None else user.daily_steps
+            if effective_steps < quest.count:
+                return Response({
+                    "success": False,
+                    "message": f"Quest not completed. Steps: {effective_steps}/{quest.count}"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            quest_progress.current_progress = effective_steps
+            quest_progress.save(update_fields=['current_progress'])
+        else:
+            if quest_progress.current_progress < quest.count:
+                return Response({
+                    "success": False,
+                    "message": f"Quest not completed. Progress: {quest_progress.current_progress}/{quest.count}"
+                }, status=status.HTTP_400_BAD_REQUEST)
 
         # Выдаем награду
         reward_given = {

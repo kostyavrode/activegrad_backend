@@ -12,7 +12,8 @@ CustomUser = User  # Для совместимости
 from .serializers import (
     UserRegistrationSerializer, UserLoginSerializer, UserClothesSerializer, 
     CustomTokenObtainPairSerializer, FriendRequestSerializer, SendFriendRequestSerializer,
-    FriendshipSerializer, UserBasicSerializer, UpgradeStatSerializer
+    FriendshipSerializer, UserBasicSerializer, UpgradeStatSerializer,
+    UpdateDailyStepsSerializer
 )
 from .models import FriendRequest, Friendship
 
@@ -311,6 +312,26 @@ class UpgradeStatView(APIView):
                 "stat_upgrade_points": user.stat_upgrade_points
             }
         }, status=status.HTTP_200_OK)
+
+
+class UpdateDailyStepsView(APIView):
+    """
+    POST /api/player/daily-steps/
+    Обновляет количество шагов за сегодня. Используется перед завершением квеста по шагам.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = UpdateDailyStepsSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "success": False,
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        user = request.user
+        user.daily_steps = serializer.validated_data['daily_steps']
+        user.save(update_fields=['daily_steps'])
+        return Response({"success": True}, status=status.HTTP_200_OK)
 
 
 class GetCurrentUserCoinsView(APIView):
