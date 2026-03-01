@@ -314,6 +314,15 @@ class CaptureLandmarkView(APIView):
         external_id = serializer.validated_data['external_id']
         user = request.user
         
+        # Меч обязателен для захвата
+        attacker_inv = get_or_create_inventory(user)
+        if not attacker_inv.has_sword():
+            return Response({
+                "success": False,
+                "error": "Sword required",
+                "message": "Для захвата достопримечательности нужен меч. Скрафтите меч в инвентаре.",
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Проверяем, можно ли захватить (30 мин неприступности или 5 мин после неудачи)
         can_capture_now, latest_capture, fail_cooldown = LandmarkCapture.can_capture(external_id)
 
@@ -357,17 +366,22 @@ class CaptureLandmarkView(APIView):
                     "time_until_next_capture_seconds": seconds_remaining,
                 }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Прошло 30 минут — считаем вероятность по мечу атакующего и щиту защитника
-        defender = latest_capture.captured_by
-        attacker_inv = get_or_create_inventory(user)
-        defender_inv = get_or_create_inventory(defender)
-        attacker_sword = attacker_inv.sword_sharpness if attacker_inv.sword_sharpness is not None else 0
-        defender_shield = defender_inv.shield_durability if defender_inv.shield_durability is not None else 0
-        
-        probability = calculate_capture_probability(attacker_sword, defender_shield)
-        roll = random.uniform(0, 100)
-        capture_succeeded = roll < probability
-        
+        attacker_sword = attacker_inv.sword_sharpness
+
+        # Первый захват (никто не владел) — всегда успех
+        if latest_capture is None:
+            capture_succeeded = True
+            probability = 100.0
+        else:
+            # Перехват — считаем вероятность по мечу атакующего и щиту защитника
+            defender = latest_capture.captured_by
+            defender_inv = get_or_create_inventory(defender)
+            defender_shield = defender_inv.shield_durability if defender_inv.shield_durability is not None else 0
+
+            probability = calculate_capture_probability(attacker_sword, defender_shield)
+            roll = random.uniform(0, 100)
+            capture_succeeded = roll < probability
+
         if not capture_succeeded:
             # Кулдаун 5 минут — нельзя пытаться снова
             cooldown_until = timezone.now() + timedelta(minutes=LandmarkCapture.FAILED_CAPTURE_COOLDOWN_MINUTES)
