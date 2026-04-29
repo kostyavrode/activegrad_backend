@@ -5,8 +5,10 @@ from rest_framework.permissions import IsAuthenticated
 from django.db.models import Count
 from django.db import transaction
 from django.contrib.auth import get_user_model
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from .models import Clan
-from .serializers import ClanSerializer, CreateClanSerializer, JoinClanSerializer
+from .serializers import ClanSerializer, CreateClanSerializer, JoinClanSerializer, ClanMemberSerializer
 
 User = get_user_model()
 
@@ -48,7 +50,7 @@ class CreateClanView(APIView):
                 
                 # Обновляем пользователя, присоединяя его к клану
                 # Используем update для обхода возможных проблем с кэшированием
-                User.objects.filter(id=user.id).update(clan=clan)
+                User.objects.filter(id=user.id).update(clan=clan, clan_joined_at=timezone.now())
                 # Обновляем объект user из базы данных
                 user.refresh_from_db()
                 
@@ -110,7 +112,7 @@ class JoinClanView(APIView):
         # Присоединяем пользователя к клану
         try:
             with transaction.atomic():
-                User.objects.filter(id=user.id).update(clan=clan)
+                User.objects.filter(id=user.id).update(clan=clan, clan_joined_at=timezone.now())
                 user.refresh_from_db()
         except Exception as e:
             return Response({
@@ -149,7 +151,7 @@ class LeaveClanView(APIView):
         try:
             with transaction.atomic():
                 # Удаляем пользователя из клана
-                User.objects.filter(id=user.id).update(clan=None)
+                User.objects.filter(id=user.id).update(clan=None, clan_joined_at=None)
                 user.refresh_from_db()
                 
                 # Проверяем, остались ли еще участники в клане
@@ -201,6 +203,24 @@ class SearchClansView(APIView):
             "clans": serializer.data,
             "total_count": len(serializer.data),
             "query": query
+        }, status=status.HTTP_200_OK)
+
+
+class ClanMembersView(APIView):
+    """
+    API endpoint для получения списка участников клана.
+    GET /api/clans/{id}/members/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        clan = get_object_or_404(Clan, pk=pk)
+        members = clan.members.only('id', 'username', 'level', 'clan_joined_at')
+        serializer = ClanMemberSerializer(members, many=True)
+        return Response({
+            "success": True,
+            "clan_id": clan.id,
+            "members": serializer.data
         }, status=status.HTTP_200_OK)
 
 

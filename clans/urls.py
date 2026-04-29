@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import (
-    CreateClanView, JoinClanView, LeaveClanView, SearchClansView, TopClansView
+    CreateClanView, JoinClanView, LeaveClanView, SearchClansView, TopClansView,
+    ClanMembersView
 )
 
 urlpatterns = [
@@ -9,5 +10,6 @@ urlpatterns = [
     path('leave/', LeaveClanView.as_view(), name='leave-clan'),
     path('search/', SearchClansView.as_view(), name='search-clans'),
     path('top/', TopClansView.as_view(), name='top-clans'),
+    path('<int:pk>/members/', ClanMembersView.as_view(), name='clan-members'),
 ]
 

@@ -29,6 +29,7 @@ class CustomUser(AbstractUser):
         blank=True,
         verbose_name="Клан"
     )
+    clan_joined_at = models.DateTimeField(null=True, blank=True, verbose_name="Дата вступления в клан")
 
     # Показатели прокачки (по умолчанию 1)
     strength = models.IntegerField(default=1, help_text="Сила")

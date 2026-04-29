@@ -1,5 +1,16 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
 from .models import Clan
+
+User = get_user_model()
+
+
+class ClanMemberSerializer(serializers.ModelSerializer):
+    joined_at = serializers.DateTimeField(source='clan_joined_at')
+
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'level', 'joined_at']
 
 
 class ClanSerializer(serializers.ModelSerializer):
