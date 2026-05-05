@@ -354,11 +354,15 @@ class GetLandmarkCaptureView(APIView):
     def get(self, request, external_id):
         # Получаем последний захват
         latest_capture = LandmarkCapture.get_latest_capture(external_id)
-        
+
         # Проверяем, можно ли захватить (30 мин или 5 мин после неудачи)
         can_capture_now, _, fail_cooldown = LandmarkCapture.can_capture(external_id)
 
-        # Если достопримечательность еще не захватывалась
+        # Меч атакующего (текущего пользователя)
+        attacker_inv = get_or_create_inventory(request.user)
+        attacker_sword = attacker_inv.sword_sharpness if attacker_inv.sword_sharpness is not None else 0
+
+        # Если достопримечательность еще не захватывалась — вероятность 100%
         if latest_capture is None:
             return Response({
                 "success": True,
@@ -367,12 +371,15 @@ class GetLandmarkCaptureView(APIView):
                 "captured_by": None,
                 "captured_at": None,
                 "clan": None,
-                "defender_shield_level": None
+                "defender_shield_level": None,
+                "capture_probability": 100,
             }, status=status.HTTP_200_OK)
 
         # Уровень щита текущего владельца (для отображения в UI)
         defender_inv = get_or_create_inventory(latest_capture.captured_by)
         defender_shield = defender_inv.shield_durability if defender_inv.shield_durability is not None else 0
+
+        capture_probability = int(calculate_capture_probability(attacker_sword, defender_shield))
 
         response_data = {
             "success": True,
@@ -388,6 +395,7 @@ class GetLandmarkCaptureView(APIView):
                 "name": latest_capture.clan.name
             } if latest_capture.clan else None,
             "defender_shield_level": defender_shield,
+            "capture_probability": capture_probability,
         }
         if not can_capture_now:
             if fail_cooldown:
