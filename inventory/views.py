@@ -176,27 +176,38 @@ class CraftItemView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+MAX_ITEM_LEVEL = 10
+
+ITEM_DISPLAY = {'sword': 'меча', 'shield': 'щита'}
+
+
 def _upgrade_item(request, item_type):
     """Общая логика улучшения меча или щита по таблице UpgradeLevelCost."""
     inventory = get_or_create_inventory(request.user)
 
     if item_type == 'sword':
         if not inventory.has_sword():
-            return Response({'success': False, 'error': 'You do not have a sword to upgrade'},
+            return Response({'success': False, 'error': 'У вас нет меча для улучшения'},
                             status=status.HTTP_400_BAD_REQUEST)
         current_level = inventory.sword_sharpness
     else:
         if not inventory.has_shield():
-            return Response({'success': False, 'error': 'You do not have a shield to upgrade'},
+            return Response({'success': False, 'error': 'У вас нет щита для улучшения'},
                             status=status.HTTP_400_BAD_REQUEST)
         current_level = inventory.shield_durability
+
+    if current_level >= MAX_ITEM_LEVEL:
+        return Response({
+            'success': False,
+            'error': f'Достигнут максимальный уровень {ITEM_DISPLAY[item_type]} ({MAX_ITEM_LEVEL})',
+        }, status=status.HTTP_400_BAD_REQUEST)
 
     next_level = current_level + 1
     cost = UpgradeLevelCost.objects.filter(item_type=item_type, level=next_level).first()
     if not cost:
         return Response({
             'success': False,
-            'error': f'No upgrade cost configured for {item_type} level {next_level}. Max level reached or config missing.',
+            'error': f'Стоимость улучшения до уровня {next_level} не настроена. Обратитесь к администратору.',
         }, status=status.HTTP_400_BAD_REQUEST)
 
     if (inventory.metal < cost.metal_required or
@@ -276,6 +287,17 @@ class UpgradeCostsView(APIView):
                 result[item_type] = {'has_item': False}
                 continue
 
+            if current_level >= MAX_ITEM_LEVEL:
+                result[item_type] = {
+                    'has_item': True,
+                    'current_level': current_level,
+                    'next_level': None,
+                    'requirements': [],
+                    'can_upgrade': False,
+                    'max_level_reached': True,
+                }
+                continue
+
             next_level = current_level + 1
             cost = UpgradeLevelCost.objects.filter(item_type=item_type, level=next_level).first()
 
@@ -295,6 +317,7 @@ class UpgradeCostsView(APIView):
                     'next_level': next_level,
                     'requirements': requirements,
                     'can_upgrade': True,
+                    'max_level_reached': False,
                 }
             else:
                 result[item_type] = {
@@ -303,6 +326,7 @@ class UpgradeCostsView(APIView):
                     'next_level': None,
                     'requirements': [],
                     'can_upgrade': False,
+                    'max_level_reached': False,
                 }
 
         return Response({'success': True, **result}, status=status.HTTP_200_OK)
