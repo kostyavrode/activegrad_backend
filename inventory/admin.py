@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import PlayerInventory, CraftRecipe, UpgradeConfig
+from .models import PlayerInventory, CraftRecipe, UpgradeConfig, UpgradeLevelCost
 
 
 @admin.register(PlayerInventory)
@@ -33,3 +33,11 @@ class UpgradeConfigAdmin(admin.ModelAdmin):
         'metal_prob_per_unit', 'wood_prob_per_unit', 'blueprints_prob_per_unit',
         'max_probability', 'is_active'
     )
+
+
+@admin.register(UpgradeLevelCost)
+class UpgradeLevelCostAdmin(admin.ModelAdmin):
+    list_display = ('id', 'item_type', 'level', 'metal_required', 'wood_required', 'blueprints_required')
+    list_filter = ('item_type',)
+    list_editable = ('metal_required', 'wood_required', 'blueprints_required')
+    ordering = ('item_type', 'level')

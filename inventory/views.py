@@ -5,8 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from django.db import transaction
 
-from .models import PlayerInventory, CraftRecipe, UpgradeConfig
-from .serializers import UpgradeRequestSerializer
+from .models import PlayerInventory, CraftRecipe, UpgradeConfig, UpgradeLevelCost
 
 
 # Маппинг для универсального API (массивы + display_name)
@@ -177,148 +176,133 @@ class CraftItemView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+def _upgrade_item(request, item_type):
+    """Общая логика улучшения меча или щита по таблице UpgradeLevelCost."""
+    inventory = get_or_create_inventory(request.user)
+
+    if item_type == 'sword':
+        if not inventory.has_sword():
+            return Response({'success': False, 'error': 'You do not have a sword to upgrade'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        current_level = inventory.sword_sharpness
+    else:
+        if not inventory.has_shield():
+            return Response({'success': False, 'error': 'You do not have a shield to upgrade'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        current_level = inventory.shield_durability
+
+    next_level = current_level + 1
+    cost = UpgradeLevelCost.objects.filter(item_type=item_type, level=next_level).first()
+    if not cost:
+        return Response({
+            'success': False,
+            'error': f'No upgrade cost configured for {item_type} level {next_level}. Max level reached or config missing.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    if (inventory.metal < cost.metal_required or
+            inventory.wood < cost.wood_required or
+            inventory.blueprints < cost.blueprints_required):
+        return Response({
+            'success': False,
+            'error': 'Insufficient resources',
+            'required': {
+                'metal': cost.metal_required,
+                'wood': cost.wood_required,
+                'blueprints': cost.blueprints_required,
+            },
+            'current': {
+                'metal': inventory.metal,
+                'wood': inventory.wood,
+                'blueprints': inventory.blueprints,
+            },
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    inventory.metal -= cost.metal_required
+    inventory.wood -= cost.wood_required
+    inventory.blueprints -= cost.blueprints_required
+
+    if item_type == 'sword':
+        inventory.sword_sharpness = next_level
+    else:
+        inventory.shield_durability = next_level
+    inventory.save()
+
+    return Response({
+        'success': True,
+        'upgraded': True,
+        'new_level': next_level,
+        'inventory': format_inventory_response(inventory),
+    }, status=status.HTTP_200_OK)
+
+
 class UpgradeSwordView(APIView):
-    """
-    POST /api/inventory/upgrade/sword/
-    Улучшение меча. В теле: metal, wood, blueprints — сколько ресурсов использовать.
-    Ответ: upgraded (bool), probability (float), new_sharpness (int | null).
-    """
+    """POST /api/inventory/upgrade/sword/ — улучшить меч до следующего уровня."""
     permission_classes = [IsAuthenticated]
 
     @transaction.atomic
     def post(self, request):
-        serializer = UpgradeRequestSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({
-                'success': False,
-                'errors': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        metal = serializer.validated_data['metal']
-        wood = serializer.validated_data['wood']
-        blueprints = serializer.validated_data['blueprints']
-
-        if metal == 0 and wood == 0 and blueprints == 0:
-            return Response({
-                'success': False,
-                'error': 'Provide at least one resource for upgrade'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        config = UpgradeConfig.objects.filter(item_type='sword', is_active=True).first()
-        if not config:
-            return Response({
-                'success': False,
-                'error': 'Upgrade config for sword not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-
-        inventory = get_or_create_inventory(request.user)
-
-        if not inventory.has_sword():
-            return Response({
-                'success': False,
-                'error': 'You do not have a sword to upgrade'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        if (inventory.metal < metal or inventory.wood < wood or inventory.blueprints < blueprints):
-            return Response({
-                'success': False,
-                'error': 'Insufficient resources',
-                'requested': {'metal': metal, 'wood': wood, 'blueprints': blueprints},
-                'current': {
-                    'metal': inventory.metal,
-                    'wood': inventory.wood,
-                    'blueprints': inventory.blueprints,
-                },
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        probability = config.calculate_probability(metal, wood, blueprints)
-        roll = random.uniform(0, 100)
-        upgraded = roll < probability
-
-        if upgraded:
-            inventory.metal -= metal
-            inventory.wood -= wood
-            inventory.blueprints -= blueprints
-            inventory.sword_sharpness += 1
-            inventory.save()
-
-        return Response({
-            'success': True,
-            'upgraded': upgraded,
-            'probability': round(probability, 2),
-            'roll': round(roll, 2),
-            'sword_sharpness': inventory.sword_sharpness,
-        }, status=status.HTTP_200_OK)
+        return _upgrade_item(request, 'sword')
 
 
 class UpgradeShieldView(APIView):
-    """
-    POST /api/inventory/upgrade/shield/
-    Улучшение щита. В теле: metal, wood, blueprints.
-    """
+    """POST /api/inventory/upgrade/shield/ — улучшить щит до следующего уровня."""
     permission_classes = [IsAuthenticated]
 
     @transaction.atomic
     def post(self, request):
-        serializer = UpgradeRequestSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({
-                'success': False,
-                'errors': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
+        return _upgrade_item(request, 'shield')
 
-        metal = serializer.validated_data['metal']
-        wood = serializer.validated_data['wood']
-        blueprints = serializer.validated_data['blueprints']
 
-        if metal == 0 and wood == 0 and blueprints == 0:
-            return Response({
-                'success': False,
-                'error': 'Provide at least one resource for upgrade'
-            }, status=status.HTTP_400_BAD_REQUEST)
+class UpgradeCostsView(APIView):
+    """
+    GET /api/inventory/upgrade/costs/
+    Возвращает стоимость следующего улучшения для меча и щита текущего игрока.
+    """
+    permission_classes = [IsAuthenticated]
 
-        config = UpgradeConfig.objects.filter(item_type='shield', is_active=True).first()
-        if not config:
-            return Response({
-                'success': False,
-                'error': 'Upgrade config for shield not found'
-            }, status=status.HTTP_404_NOT_FOUND)
-
+    def get(self, request):
         inventory = get_or_create_inventory(request.user)
+        result = {}
 
-        if not inventory.has_shield():
-            return Response({
-                'success': False,
-                'error': 'You do not have a shield to upgrade'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        for item_type in ('sword', 'shield'):
+            if item_type == 'sword':
+                current_level = inventory.sword_sharpness
+                has_item = inventory.has_sword()
+            else:
+                current_level = inventory.shield_durability
+                has_item = inventory.has_shield()
 
-        if (inventory.metal < metal or inventory.wood < wood or inventory.blueprints < blueprints):
-            return Response({
-                'success': False,
-                'error': 'Insufficient resources',
-                'requested': {'metal': metal, 'wood': wood, 'blueprints': blueprints},
-                'current': {
-                    'metal': inventory.metal,
-                    'wood': inventory.wood,
-                    'blueprints': inventory.blueprints,
-                },
-            }, status=status.HTTP_400_BAD_REQUEST)
+            if not has_item:
+                result[item_type] = {'has_item': False}
+                continue
 
-        probability = config.calculate_probability(metal, wood, blueprints)
-        roll = random.uniform(0, 100)
-        upgraded = roll < probability
+            next_level = current_level + 1
+            cost = UpgradeLevelCost.objects.filter(item_type=item_type, level=next_level).first()
 
-        if upgraded:
-            inventory.metal -= metal
-            inventory.wood -= wood
-            inventory.blueprints -= blueprints
-            inventory.shield_durability += 1
-            inventory.save()
+            if cost:
+                requirements = []
+                for rid, field in RESOURCE_FIELDS.items():
+                    amount = getattr(cost, f'{rid}_required')
+                    if amount > 0:
+                        requirements.append({
+                            'resource_id': rid,
+                            'amount': amount,
+                            'display_name': RESOURCE_DISPLAY_NAMES[rid],
+                        })
+                result[item_type] = {
+                    'has_item': True,
+                    'current_level': current_level,
+                    'next_level': next_level,
+                    'requirements': requirements,
+                    'can_upgrade': True,
+                }
+            else:
+                result[item_type] = {
+                    'has_item': True,
+                    'current_level': current_level,
+                    'next_level': None,
+                    'requirements': [],
+                    'can_upgrade': False,
+                }
 
-        return Response({
-            'success': True,
-            'upgraded': upgraded,
-            'probability': round(probability, 2),
-            'roll': round(roll, 2),
-            'shield_durability': inventory.shield_durability,
-        }, status=status.HTTP_200_OK)
+        return Response({'success': True, **result}, status=status.HTTP_200_OK)

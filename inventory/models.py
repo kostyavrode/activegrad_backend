@@ -142,3 +142,34 @@ class UpgradeConfig(models.Model):
         prob += wood * self.wood_prob_per_unit
         prob += blueprints * self.blueprints_prob_per_unit
         return min(max(0, prob), self.max_probability)
+
+
+class UpgradeLevelCost(models.Model):
+    """
+    Стоимость улучшения предмета до конкретного уровня.
+    Настраивается через админку. Каждый следующий уровень дороже.
+    """
+    item_type = models.CharField(
+        max_length=20,
+        choices=ITEM_TYPE_CHOICES,
+        verbose_name='Тип предмета'
+    )
+    level = models.IntegerField(
+        verbose_name='Уровень (до которого улучшаем)',
+        help_text='Например, 2 = улучшение с 1 до 2'
+    )
+    metal_required = models.IntegerField(default=0, verbose_name='Металл (требуется)')
+    wood_required = models.IntegerField(default=0, verbose_name='Дерево (требуется)')
+    blueprints_required = models.IntegerField(default=0, verbose_name='Чертежи (требуется)')
+
+    class Meta:
+        unique_together = ('item_type', 'level')
+        ordering = ['item_type', 'level']
+        verbose_name = 'Стоимость улучшения по уровню'
+        verbose_name_plural = 'Стоимости улучшений по уровням'
+
+    def __str__(self):
+        return f'{self.get_item_type_display()} → уровень {self.level}'
+
+    def get_item_type_display(self):
+        return dict(ITEM_TYPE_CHOICES).get(self.item_type, self.item_type)
