@@ -8,7 +8,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 from datetime import timedelta
 import logging
-from .models import PlayerLandmarkObservation, LandmarkCapture, LandmarkCaptureCooldown
+from .models import PlayerLandmarkObservation, LandmarkCapture, LandmarkCaptureCooldown, LandmarkCaptureRewardCollection
 from .serializers import SavePlayerLandmarksSerializer, CaptureLandmarkSerializer, LandmarkCaptureSerializer
 from .mark_sights_rewards import apply_mark_sights_progress_and_inventory_rewards
 from inventory.views import get_or_create_inventory
@@ -277,6 +277,16 @@ class CaptureLandmarkView(APIView):
         
         attacker_sword = attacker_inv.sword_sharpness
 
+        # Нельзя захватить достопримечательность у самого себя
+        if latest_capture is not None and latest_capture.captured_by == user:
+            return Response({
+                "success": False,
+                "error": "Already owner",
+                "message": "Вы уже владеете этой достопримечательностью. Нельзя захватить её у самого себя.",
+                "is_owner": True,
+                "captured_at": latest_capture.captured_at.isoformat(),
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Первый захват (никто не владел) — всегда успех
         if latest_capture is None:
             capture_succeeded = True
@@ -318,10 +328,16 @@ class CaptureLandmarkView(APIView):
             captured_by=user,
             clan=user.clan
         )
-        
+
+        # Бонус за захват: 1 случайный ресурс сразу
+        capture_resource = random.choice(('metal', 'wood', 'blueprints'))
+        setattr(attacker_inv, capture_resource, getattr(attacker_inv, capture_resource) + 1)
+        attacker_inv.save()
+        capture_reward = {capture_resource: 1}
+
         return Response({
             "success": True,
-            "message": "Landmark captured successfully. Owner changed.",
+            "message": "Достопримечательность захвачена!",
             "capture": {
                 "id": new_capture.id,
                 "external_id": new_capture.external_id,
@@ -334,8 +350,86 @@ class CaptureLandmarkView(APIView):
                     "id": new_capture.clan.id,
                     "name": new_capture.clan.name
                 } if new_capture.clan else None
-            }
+            },
+            "capture_reward": capture_reward,
         }, status=status.HTTP_201_CREATED)
+
+
+class CollectCaptureRewardsView(APIView):
+    """
+    POST /api/landmarks/collect-rewards/
+    Собирает накопленные почасовые ресурсы за все захваченные игроком достопримечательности.
+    1 случайный ресурс за каждый целый час владения, максимум 8 часов на одну точку.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        user = request.user
+        now = timezone.now()
+
+        # Все external_id, когда-либо захваченные игроком
+        user_external_ids = (
+            LandmarkCapture.objects.filter(captured_by=user)
+            .values_list('external_id', flat=True)
+            .distinct()
+        )
+
+        total_resources = {'metal': 0, 'wood': 0, 'blueprints': 0}
+        total_hours_collected = 0
+
+        for external_id in user_external_ids:
+            latest = LandmarkCapture.get_latest_capture(external_id)
+            # Пропускаем, если игрок больше не владеет точкой
+            if latest is None or latest.captured_by_id != user.id:
+                continue
+
+            elapsed_seconds = (now - latest.captured_at).total_seconds()
+            whole_hours = min(
+                int(elapsed_seconds // 3600),
+                LandmarkCaptureRewardCollection.MAX_REWARD_HOURS,
+            )
+            if whole_hours == 0:
+                continue
+
+            collection, _ = LandmarkCaptureRewardCollection.objects.get_or_create(capture=latest)
+            available = max(0, whole_hours - collection.hours_collected)
+            if available == 0:
+                continue
+
+            for _ in range(available):
+                chosen = random.choice(('metal', 'wood', 'blueprints'))
+                total_resources[chosen] += 1
+
+            collection.hours_collected = whole_hours
+            collection.save()
+            total_hours_collected += available
+
+        if total_hours_collected == 0:
+            return Response({
+                "success": True,
+                "message": "Нет доступных ресурсов для сбора.",
+                "resources_gained": {"metal": 0, "wood": 0, "blueprints": 0},
+                "total_hours": 0,
+            })
+
+        inventory = get_or_create_inventory(user)
+        inventory.metal += total_resources['metal']
+        inventory.wood += total_resources['wood']
+        inventory.blueprints += total_resources['blueprints']
+        inventory.save()
+
+        logger.info(
+            "Player %s collected capture rewards: %s (total hours: %s)",
+            user.id, total_resources, total_hours_collected,
+        )
+
+        return Response({
+            "success": True,
+            "message": f"Собрано ресурсов за {total_hours_collected} ч. владения.",
+            "resources_gained": total_resources,
+            "total_hours": total_hours_collected,
+        })
 
 
 class GetLandmarkCaptureView(APIView):

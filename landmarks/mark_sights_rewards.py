@@ -87,6 +87,19 @@ def apply_mark_sights_progress_and_inventory_rewards(
         total_blueprints = sum(
             random.randint(REWARD_MIN, REWARD_MAX) for _ in range(newly_created_count)
         )
+
+        # Бонус за первое посещение: за каждую новую достопримечательность
+        # случайно выбирается один тип ресурса и начисляется 1 единица.
+        _RESOURCE_TYPES = ("metal", "wood", "blueprints")
+        first_visit_bonus: dict[str, int] = {"metal": 0, "wood": 0, "blueprints": 0}
+        for _ in range(newly_created_count):
+            chosen = random.choice(_RESOURCE_TYPES)
+            first_visit_bonus[chosen] += 1
+
+        total_metal += first_visit_bonus["metal"]
+        total_wood += first_visit_bonus["wood"]
+        total_blueprints += first_visit_bonus["blueprints"]
+
         inventory = get_or_create_inventory(player)
         inventory.metal += total_metal
         inventory.wood += total_wood
@@ -96,14 +109,16 @@ def apply_mark_sights_progress_and_inventory_rewards(
             "metal": total_metal,
             "wood": total_wood,
             "blueprints": total_blueprints,
+            "first_visit_bonus": first_visit_bonus,
         }
         logger.info(
-            "Player %s received resources for %s new mark(s): metal=%s wood=%s blueprints=%s",
+            "Player %s received resources for %s new mark(s): metal=%s wood=%s blueprints=%s (first_visit_bonus=%s)",
             pid,
             newly_created_count,
             total_metal,
             total_wood,
             total_blueprints,
+            first_visit_bonus,
         )
     except Exception:
         logger.error(

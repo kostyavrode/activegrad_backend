@@ -138,3 +138,29 @@ class LandmarkCaptureCooldown(models.Model):
         """Время до окончания кулдауна."""
         remaining = self.cooldown_until - timezone.now()
         return remaining if remaining.total_seconds() > 0 else timedelta(0)
+
+
+class LandmarkCaptureRewardCollection(models.Model):
+    """
+    Отслеживает, сколько часовых наград уже собрано за конкретный захват.
+    При смене владельца создаётся новый LandmarkCapture — и новая запись.
+    Максимум 8 часов наград на захват.
+    """
+    MAX_REWARD_HOURS = 8
+
+    capture = models.OneToOneField(
+        LandmarkCapture,
+        on_delete=models.CASCADE,
+        related_name='reward_collection',
+    )
+    hours_collected = models.IntegerField(default=0, verbose_name="Часов уже собрано")
+
+    class Meta:
+        verbose_name = "Сбор ресурсов за захват"
+        verbose_name_plural = "Сборы ресурсов за захваты"
+
+    def available_hours(self):
+        """Количество новых целых часов, доступных для сбора."""
+        elapsed = timezone.now() - self.capture.captured_at
+        whole_hours = min(int(elapsed.total_seconds() // 3600), self.MAX_REWARD_HOURS)
+        return max(0, whole_hours - self.hours_collected)
