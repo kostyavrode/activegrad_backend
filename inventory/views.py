@@ -264,6 +264,56 @@ class UpgradeShieldView(APIView):
         return _upgrade_item(request, 'shield')
 
 
+_MINIGAME_RESOURCE_TYPES = ('metal', 'wood', 'blueprints')
+
+
+class MinigameCompleteView(APIView):
+    """
+    POST /api/inventory/minigame-complete/
+    Начисляет ресурсы за прохождение мини-игры в зависимости от результата:
+      >= 90% → 2 случайных ресурса
+      >= 65% → 1 случайный ресурс
+      < 65%  → 0 ресурсов
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        try:
+            score_percent = int(request.data.get('score_percent', 0))
+        except (TypeError, ValueError):
+            return Response({'success': False, 'error': 'Invalid score_percent'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        score_percent = max(0, min(100, score_percent))
+
+        if score_percent >= 90:
+            reward_count = 2
+        elif score_percent >= 65:
+            reward_count = 1
+        else:
+            reward_count = 0
+
+        resources_gained = {'metal': 0, 'wood': 0, 'blueprints': 0}
+
+        if reward_count > 0:
+            inventory = get_or_create_inventory(request.user)
+            for _ in range(reward_count):
+                chosen = random.choice(_MINIGAME_RESOURCE_TYPES)
+                resources_gained[chosen] += 1
+            for res, amount in resources_gained.items():
+                if amount > 0:
+                    setattr(inventory, res, getattr(inventory, res) + amount)
+            inventory.save()
+
+        return Response({
+            'success': True,
+            'score_percent': score_percent,
+            'resources_gained': resources_gained,
+            'total_resources': reward_count,
+        }, status=status.HTTP_200_OK)
+
+
 class UpgradeCostsView(APIView):
     """
     GET /api/inventory/upgrade/costs/

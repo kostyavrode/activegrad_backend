@@ -6,6 +6,7 @@ from .views import (
     UpgradeSwordView,
     UpgradeShieldView,
     UpgradeCostsView,
+    MinigameCompleteView,
 )
 
 urlpatterns = [
@@ -15,4 +16,5 @@ urlpatterns = [
     path('upgrade/costs/', UpgradeCostsView.as_view(), name='upgrade-costs'),
     path('upgrade/sword/', UpgradeSwordView.as_view(), name='upgrade-sword'),
     path('upgrade/shield/', UpgradeShieldView.as_view(), name='upgrade-shield'),
+    path('minigame-complete/', MinigameCompleteView.as_view(), name='minigame-complete'),
 ]

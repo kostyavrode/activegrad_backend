@@ -385,10 +385,12 @@ class CollectCaptureRewardsView(APIView):
                 continue
 
             elapsed_seconds = (now - latest.captured_at).total_seconds()
-            whole_hours = min(
-                int(elapsed_seconds // 3600),
-                LandmarkCaptureRewardCollection.MAX_REWARD_HOURS,
-            )
+
+            # Точка приносит ресурсы только первые 8 часов с момента захвата
+            if elapsed_seconds >= LandmarkCaptureRewardCollection.MAX_REWARD_HOURS * 3600:
+                continue
+
+            whole_hours = int(elapsed_seconds // 3600)
             if whole_hours == 0:
                 continue
 

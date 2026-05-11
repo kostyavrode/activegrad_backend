@@ -160,7 +160,10 @@ class LandmarkCaptureRewardCollection(models.Model):
         verbose_name_plural = "Сборы ресурсов за захваты"
 
     def available_hours(self):
-        """Количество новых целых часов, доступных для сбора."""
-        elapsed = timezone.now() - self.capture.captured_at
-        whole_hours = min(int(elapsed.total_seconds() // 3600), self.MAX_REWARD_HOURS)
+        """Количество новых целых часов, доступных для сбора.
+        После 8 часов с момента захвата точка перестаёт приносить ресурсы."""
+        elapsed_seconds = (timezone.now() - self.capture.captured_at).total_seconds()
+        if elapsed_seconds >= self.MAX_REWARD_HOURS * 3600:
+            return 0
+        whole_hours = int(elapsed_seconds // 3600)
         return max(0, whole_hours - self.hours_collected)
